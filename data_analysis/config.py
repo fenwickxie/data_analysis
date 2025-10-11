@@ -1,0 +1,80 @@
+# 配置文件：Kafka、topic、模块依赖
+
+
+KAFKA_CONFIG = {
+    'bootstrap_servers': ['localhost:9092'],
+    'group_id': 'data_analysis_group',
+    'auto_offset_reset': 'latest',
+    'enable_auto_commit': True,
+}
+
+# topic详细配置
+TOPIC_DETAIL = {
+    'SCHEDULE-STATION-PARAM': {
+        'fields': ['station_id', 'station_temp', 'lat', 'lng', 'gun_count', 'grid_capacity', 'storage_count', 'storage_capacity', 'host_id'],
+        'frequency': '新建站或配置更改时',
+        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model']
+    },
+    'SCHEDULE-STATION-REALTIME-DATA': {
+        'fields': ['station_id', 'gun_id', 'history_curve_gun_avg', 'history_curve_gun_max', 'history_curve_station_avg', 'history_curve_station_max'],
+        'frequency': '1分钟1次，推送7天',
+        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model']
+    },
+    'SCHEDULE-ENVIRONMENT-CALENDAR': {
+        'fields': ['workday_code', 'holiday_code'],
+        'frequency': '1年1次',
+        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model']
+    },
+    'SCHEDULE-DEVICE-METER': {
+        'fields': ['meter_id', 'current_power', 'rated_power_limit'],
+        'frequency': '5分钟1次',
+        'modules': ['operation_optimization', 'electricity_price']
+    },
+    'SCHEDULE-DEVICE-GUN': {
+        'fields': ['host_id', 'gun_id', 'gun_status'],
+        'frequency': '15秒1次',
+        'modules': ['operation_optimization']
+    },
+    'SCHEDULE-CAR-ORDER': {
+        'fields': ['station_id', 'order_id', 'charger_id', 'gun_id', 'charger_rated_current', 'start_time', 'end_time', 'start_SOC', 'current_SOC', 'demand_voltage', 'demand_current', 'mileage', 'car_model', 'battery_capacity'],
+        'frequency': '1秒1次',
+        'modules': ['load_prediction', 'operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model']
+    },
+    'SCHEDULE-CAR-PRICE': {
+        'fields': ['station_id', 'period_no', 'start_time', 'end_time', 'period_type', 'grid_price', 'service_fee'],
+        'frequency': '1月1次',
+        'modules': ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management']
+    },
+    'SCHEDULE-DEVICE-ERROR': {
+        'fields': ['station_id', 'host_error', 'ac_error', 'dc_error', 'terminal_error', 'storage_error'],
+        'frequency': '触发推送',
+        'modules': ['operation_optimization', 'SOH_model']
+    },
+    'SCHEDULE-DEVICE-HOST': {
+        'fields': ['host_id', 'acdc_status', 'dcdc_input_power', 'acdc_input_power'],
+        'frequency': '充电时1秒1次，非充电15秒1次',
+        'modules': ['evaluation_model', 'thermal_management']
+    },
+    'SCHEDULE-DEVICE-STORAGE': {
+        'fields': ['host_id', 'storage_id', 'storage_power', 'storage_current', 'storage_temp_max', 'storage_temp_min', 'storage_SOC', 'storage_SOH'],
+        'frequency': '15秒1次',
+        'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization']
+    },
+}
+
+# topic到模块的多对多映射
+TOPIC_TO_MODULES = {topic: v['modules'] for topic, v in TOPIC_DETAIL.items()}
+# 模块到topic的多对多映射
+MODULE_TO_TOPICS = {}
+for topic, v in TOPIC_DETAIL.items():
+    for m in v['modules']:
+        MODULE_TO_TOPICS.setdefault(m, []).append(topic)
+
+# 各模块间依赖关系
+MODULE_DEPENDENCIES = {
+    'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
+    'station_guidance': ['load_prediction', 'evaluation_model'],
+    'thermal_management': ['load_prediction', 'operation_optimization'],
+    'operation_optimization': ['load_prediction'],
+    # 其他模块依赖可扩展
+}
