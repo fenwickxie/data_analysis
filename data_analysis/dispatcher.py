@@ -30,6 +30,27 @@ TOPIC_PARSER_MAP = {
 
 
 class DataDispatcher:
+    """
+    数据分发与依赖处理核心类。
+    
+    该类负责管理多场站数据窗口缓存，处理模块间依赖关系，
+    并将多topic数据整合为各业务模块所需格式。支持多种数据补全策略，
+    并提供动态配置更新功能。
+    
+    主要功能：
+    - 多场站数据窗口管理
+    - 数据补全/插值处理
+    - 模块间依赖处理
+    - 动态配置热更新
+    - 数据清理和过期处理
+    
+    Attributes:
+        data_cache (dict): 多场站窗口缓存，格式为 {station_id: {topic: deque[(data, ts)]}}
+        data_expire_seconds (int): 数据过期时间(秒)
+        lock (threading.Lock): 线程锁，确保线程安全
+        padding_strategy (str): 窗口补全策略，默认为"zero"
+        parsers (dict): 业务模块解析器映射
+    """
 
     def reload_config(self, config_mod):
         """
@@ -52,6 +73,16 @@ class DataDispatcher:
         self.padding_strategy = strategy
 
     def __init__(self, data_expire_seconds=600):
+        """
+        初始化数据分发器，设置解析器和缓存参数。
+        
+        创建分发器实例时会初始化所有业务模块解析器，
+        设置数据缓存结构和默认补全策略。
+        
+        Args:
+            data_expire_seconds (int, optional): 数据过期时间(秒)，默认为600。
+                超过此时间未更新的场站数据将被自动清理。
+        """
         self.parsers = {
             "electricity_price": ElectricityPriceParser(),
             "load_prediction": LoadPredictionParser(),
@@ -70,7 +101,20 @@ class DataDispatcher:
         self.padding_strategy = "zero"  # 默认零填充
 
     def update_topic_data(self, station_id, topic, raw_data):
-        # 更新指定场站、topic的数据窗口
+        """
+        更新指定场站、topic的数据窗口。
+        
+        将新数据添加到对应场站和topic的数据窗口中，如果窗口已满，
+        会自动移除最旧的数据。此方法线程安全，可在多线程环境下使用。
+        
+        Args:
+            station_id (str): 场站ID
+            topic (str): topic名称
+            raw_data (dict): 原始数据
+            
+        Raises:
+            DispatcherError: 当数据更新失败时抛出
+        """
         try:
             with self.lock:
                 if station_id not in self.data_cache:

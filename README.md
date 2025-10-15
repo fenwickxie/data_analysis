@@ -1,6 +1,54 @@
 # 数据解析模块 data_analysis
 
-本模块负责从Kafka获取各topic数据，解析、加工成各业务模块所需格式，并提供统一的数据分发接口。
+## 项目简介
+
+data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafka获取各topic数据，解析、加工成各业务模块所需格式，并提供统一的数据分发接口。该模块支持多场站并发处理、窗口数据补全/插值、跨模块依赖处理，并易于扩展和云平台部署。
+
+## 背景与目标用户
+
+本模块主要面向充电站运营平台的数据处理需求，支持多种业务场景，包括负荷预测、运营优化、电价策略、热管理、客户挖掘等。目标用户包括：
+- 充电站运营平台开发团队
+- 数据分析工程师
+- 机器学习模型开发人员
+- 系统架构师
+
+## 安装说明
+
+### 环境要求
+- Python 3.7+
+- Kafka集群（用于数据输入/输出）
+
+### 安装步骤
+
+1. 克隆仓库：
+   ```bash
+   git clone [仓库地址]
+   cd data_analysis
+   ```
+
+2. 安装依赖：
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+3. 配置Kafka连接（在`data_analysis/config.py`中修改`KAFKA_CONFIG`）：
+   ```python
+   KAFKA_CONFIG = {
+       'bootstrap_servers': ['your_kafka_server:9092'],
+       'group_id': 'your_group_id',
+       'auto_offset_reset': 'latest',
+       'enable_auto_commit': True,
+   }
+   ```
+
+4. 运行示例：
+   ```bash
+   # 同步示例
+   python data_analysis/main.py
+   
+   # 异步示例
+   python data_analysis/async_main.py
+   ```
 
 ## 目录结构
 
@@ -42,6 +90,114 @@
 - 跨模块数据依赖处理
 - 对外统一数据分发接口，支持上传到Kafka
 - 易于扩展和云平台部署
+
+## 配置说明
+
+### 核心配置文件：`data_analysis/config.py`
+
+1. **Kafka配置**：
+   ```python
+   KAFKA_CONFIG = {
+       'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址
+       'group_id': 'data_analysis_group',         # 消费者组ID
+       'auto_offset_reset': 'latest',             # 消费策略：latest/earliest
+       'enable_auto_commit': True,               # 是否自动提交offset
+   }
+   ```
+
+2. **Topic配置**：
+   - `TOPIC_DETAIL`：每个topic的详细配置，包括字段、推送频率、依赖模块和数据窗口大小
+   - `TOPIC_TO_MODULES`：topic到业务模块的多对多映射
+   - `MODULE_TO_TOPICS`：业务模块到topic的多对多映射
+   - `MODULE_DEPENDENCIES`：模块间的依赖关系
+
+3. **数据窗口配置**：
+   - 每个topic的`window_size`定义了数据缓存窗口大小
+   - 窗口大小根据数据频率和业务需求设定，例如高频数据(15秒)可能需要更大的窗口
+
+### 服务配置
+
+1. **数据过期时间**：
+   ```python
+   # 在初始化服务时设置
+   service = DataAnalysisService(data_expire_seconds=600)  # 数据10分钟后过期
+   ```
+
+2. **输出Topic配置**：
+   ```python
+   # 输出Topic前缀
+   service = DataAnalysisService(output_topic_prefix="MODULE-OUTPUT-")
+   ```
+
+3. **窗口补全策略**：
+   - 'zero'：补零（默认）
+   - 'linear'：线性插值
+   - 'forward'：前向填充
+   - 'missing'：标记为None
+
+## 故障排除指南
+
+### 常见问题及解决方案
+
+1. **Kafka连接失败**：
+   - 检查`KAFKA_CONFIG`中的`bootstrap_servers`是否正确
+   - 确认Kafka服务是否正常运行
+   - 检查网络连接和防火墙设置
+
+2. **数据解析错误**：
+   - 检查topic数据格式是否符合预期
+   - 确认字段名称是否与配置一致
+   - 查看日志中的具体错误信息
+
+3. **内存占用过高**：
+   - 调整`data_expire_seconds`减少数据缓存时间
+   - 优化窗口大小，避免不必要的历史数据存储
+   - 增加系统可用内存或调整JVM参数（如使用Kafka Java客户端时）
+
+4. **数据分发延迟**：
+   - 检查Kafka生产者配置
+   - 考虑增加消费者并行度
+   - 优化回调函数处理逻辑
+
+5. **模块依赖问题**：
+   - 检查`MODULE_DEPENDENCIES`配置是否正确
+   - 确认依赖模块是否正常输出数据
+   - 查看依赖解析相关的日志
+
+### 日志查看
+
+日志文件默认保存在`data_analysis.log`中，包含以下关键信息：
+- Kafka连接状态
+- 数据处理过程
+- 错误和异常信息
+- 性能指标
+
+可通过修改`logging.basicConfig`配置调整日志级别和输出方式。
+
+## 性能优化建议
+
+1. **多场站并发处理**：
+   - 同步服务：调整`ThreadPoolExecutor`的`max_workers`参数
+   - 异步服务：利用asyncio的并发能力，适当增加事件循环并发数
+
+2. **内存优化**：
+   - 合理设置数据窗口大小，避免不必要的历史数据存储
+   - 定期清理过期数据，调用`clean_expired()`方法
+   - 使用高效的数据结构，如`deque`实现滑动窗口
+
+3. **Kafka优化**：
+   - 根据数据量调整`batch_size`和`linger_ms`参数
+   - 使用压缩减少网络传输开销
+   - 合理分区，提高并行处理能力
+
+4. **批处理优化**：
+   - 对于高频数据，考虑适当降低处理频率
+   - 实现批处理回调，减少单条数据处理开销
+
+5. **资源监控**：
+   - 监控内存使用情况，及时调整缓存策略
+   - 跟踪Kafka消费/生产速率，平衡处理能力
+   - 监控CPU使用率，优化计算密集型任务
 
 ## topic与模块映射
 
@@ -143,3 +299,83 @@ if __name__ == "__main__":
 - 日志、健康监控、配置热更新等功能同步/异步均支持。
 
 如需更多用法示例、测试用例，请参考 data_analysis/async_main.py、tests/test_async_service.py。
+
+## 贡献指南
+
+我们欢迎任何形式的贡献，包括但不限于：
+- 报告bug
+- 提出功能建议
+- 改进文档
+- 提交代码
+
+### 开发环境设置
+
+1. 克隆仓库并创建开发分支：
+   ```bash
+   git clone [仓库地址]
+   cd data_analysis
+   git checkout -b feature/your-feature-name
+   ```
+
+2. 安装开发依赖：
+   ```bash
+   pip install -r requirements.txt
+   pip install pytest black flake8  # 测试和代码格式化工具
+   ```
+
+3. 运行测试：
+   ```bash
+   pytest tests/
+   ```
+
+### 代码规范
+
+- 遵循PEP 8 Python代码风格规范
+- 使用black进行代码格式化
+- 使用flake8检查代码质量
+- 为所有公共API添加完整的文档字符串
+- 保持函数和类的简洁性，避免过长的函数
+
+### 提交PR流程
+
+1. 确保所有测试通过
+2. 更新相关文档
+3. 提交清晰、描述性的提交信息
+4. 创建Pull Request，详细描述变更内容和原因
+
+### 提交信息规范
+
+提交信息应遵循以下格式：
+```
+<类型>(<范围>): <描述>
+
+[可选的详细描述]
+
+[可选的关闭issue引用]
+```
+
+类型包括：
+- feat: 新功能
+- fix: 修复bug
+- docs: 文档更新
+- style: 代码格式调整
+- refactor: 代码重构
+- test: 测试相关
+- chore: 其他不涉及src或test的修改
+
+## 版本历史
+
+### v1.0.0 (2025-10-15)
+- 初始版本发布
+- 实现基本的数据解析和分发功能
+- 支持同步和异步两种API
+- 实现多场站并发处理
+- 支持数据窗口补全/插值
+- 支持模块间依赖处理
+- 支持配置热更新
+
+### 计划中的功能
+- v1.1.0: 添加更多数据窗口补全策略
+- v1.2.0: 增强监控和日志功能
+- v1.3.0: 支持分布式部署
+- v2.0.0: 实现插件化架构

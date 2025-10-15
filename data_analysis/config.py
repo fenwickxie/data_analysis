@@ -2,10 +2,25 @@
 
 
 KAFKA_CONFIG = {
-    'bootstrap_servers': ['localhost:9092'],
-    'group_id': 'data_analysis_group',
-    'auto_offset_reset': 'latest',
-    'enable_auto_commit': True,
+    'bootstrap_servers': ['10.8.4.40:35888'],
+    'consumer': {
+        'group_id': 'stack-charge-tcp-command',
+        'auto_offset_reset': 'latest',
+        'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
+        'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
+        'max_poll_records': 3000,
+        'enable_auto_commit': False,
+    },
+    'listener': {
+        'ack-mode': 'manual',
+        'type': 'batch',
+        'missing-topics-fatal': False,
+    },
+    'producer': {
+        'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
+        'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
+
+    }
 }
 
 # topic详细配置
