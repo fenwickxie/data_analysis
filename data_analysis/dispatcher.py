@@ -2,87 +2,206 @@
 from .config import MODULE_DEPENDENCIES
 from .parsers import *
 
+
 import threading
 import time
-from .config import TOPIC_TO_MODULES, MODULE_TO_TOPICS
+import logging
+from collections import deque
+from .__init__ import handle_error, DispatcherError
+
+logging.basicConfig(
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s"
+)
+from .config import TOPIC_TO_MODULES, MODULE_TO_TOPICS, TOPIC_DETAIL
 from .topic_parsers import *
 
 TOPIC_PARSER_MAP = {
-    'SCHEDULE-STATION-PARAM': StationParamParser(),
-    'SCHEDULE-STATION-REALTIME-DATA': StationRealtimeDataParser(),
-    'SCHEDULE-ENVIRONMENT-CALENDAR': EnvironmentCalendarParser(),
-    'SCHEDULE-DEVICE-METER': DeviceMeterParser(),
-    'SCHEDULE-DEVICE-GUN': DeviceGunParser(),
-    'SCHEDULE-CAR-ORDER': CarOrderParser(),
-    'SCHEDULE-CAR-PRICE': CarPriceParser(),
-    'SCHEDULE-DEVICE-ERROR': DeviceErrorParser(),
-    'SCHEDULE-DEVICE-HOST': DeviceHostParser(),
-    'SCHEDULE-DEVICE-STORAGE': DeviceStorageParser(),
+    "SCHEDULE-STATION-PARAM": StationParamParser(),
+    "SCHEDULE-STATION-REALTIME-DATA": StationRealtimeDataParser(),
+    "SCHEDULE-ENVIRONMENT-CALENDAR": EnvironmentCalendarParser(),
+    "SCHEDULE-DEVICE-METER": DeviceMeterParser(),
+    "SCHEDULE-DEVICE-GUN": DeviceGunParser(),
+    "SCHEDULE-CAR-ORDER": CarOrderParser(),
+    "SCHEDULE-CAR-PRICE": CarPriceParser(),
+    "SCHEDULE-DEVICE-ERROR": DeviceErrorParser(),
+    "SCHEDULE-DEVICE-HOST": DeviceHostParser(),
+    "SCHEDULE-DEVICE-STORAGE": DeviceStorageParser(),
 }
 
+
 class DataDispatcher:
+
+    def reload_config(self, config_mod):
+        """
+        热加载config模块，动态更新topic、窗口、依赖等。
+        """
+        global TOPIC_DETAIL, TOPIC_PARSER_MAP, MODULE_DEPENDENCIES, MODULE_TO_TOPICS
+        TOPIC_DETAIL = config_mod.TOPIC_DETAIL
+        MODULE_DEPENDENCIES = config_mod.MODULE_DEPENDENCIES
+        MODULE_TO_TOPICS = config_mod.MODULE_TO_TOPICS
+        # 解析器映射如有变动可重建
+        # 这里只重建窗口长度等配置
+        logging.info("DataDispatcher配置热更新完成")
+
+    def set_padding_strategy(self, strategy):
+        """
+        设置窗口补全策略。
+        strategy: 'zero'（补零）、'linear'（线性插值）、'forward'（前向填充）、'missing'（缺失标记None）
+        """
+        assert strategy in ("zero", "linear", "forward", "missing")
+        self.padding_strategy = strategy
+
     def __init__(self, data_expire_seconds=600):
-        # 各模块解析器注册
         self.parsers = {
-            'electricity_price': ElectricityPriceParser(),
-            'load_prediction': LoadPredictionParser(),
-            'pv_prediction': PvPredictionParser(),
-            'thermal_management': ThermalManagementParser(),
-            'station_guidance': StationGuidanceParser(),
-            'evaluation_model': EvaluationModelParser(),
-            'SOH_model': SOHModelParser(),
-            'operation_optimization': OperationOptimizationParser(),
-            'customer_mining': CustomerMiningParser(),
+            "electricity_price": ElectricityPriceParser(),
+            "load_prediction": LoadPredictionParser(),
+            "pv_prediction": PvPredictionParser(),
+            "thermal_management": ThermalManagementParser(),
+            "station_guidance": StationGuidanceParser(),
+            "evaluation_model": EvaluationModelParser(),
+            "SOH_model": SOHModelParser(),
+            "operation_optimization": OperationOptimizationParser(),
+            "customer_mining": CustomerMiningParser(),
         }
-        # 多场站缓存结构: {station_id: {topic: (data, ts)}}
+        # 多场站窗口缓存: {station_id: {topic: deque[(data, ts)]}}
         self.data_cache = {}
         self.data_expire_seconds = data_expire_seconds
         self.lock = threading.Lock()
+        self.padding_strategy = "zero"  # 默认零填充
 
     def update_topic_data(self, station_id, topic, raw_data):
-        # 更新指定场站、topic的数据
-        with self.lock:
-            if station_id not in self.data_cache:
-                self.data_cache[station_id] = {k: (None, 0) for k in TOPIC_PARSER_MAP.keys()}
-            self.data_cache[station_id][topic] = (raw_data, time.time())
+        # 更新指定场站、topic的数据窗口
+        try:
+            with self.lock:
+                if station_id not in self.data_cache:
+                    self.data_cache[station_id] = {}
+                if topic not in self.data_cache[station_id]:
+                    win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
+                    self.data_cache[station_id][topic] = deque(maxlen=win_size)
+                self.data_cache[station_id][topic].append((raw_data, time.time()))
+        except Exception as e:
+            handle_error(
+                DispatcherError(e),
+                context=f"窗口数据更新 station_id={station_id}, topic={topic}",
+            )
+
+    def get_topic_window(self, station_id, topic):
+        # 获取窗口数据（只返回data部分，按时间升序）
+        if (
+            station_id not in self.data_cache
+            or topic not in self.data_cache[station_id]
+        ):
+            return []
+        return [item[0] for item in self.data_cache[station_id][topic]]
 
     def get_module_input(self, station_id, module):
-        # 整合该场站所有topic数据，组装为模块输入
-        with self.lock:
-            if station_id not in self.data_cache:
-                return None
-            input_data = {}
-            for topic in MODULE_TO_TOPICS.get(module, []):
-                topic_data = self.data_cache[station_id].get(topic, (None, 0))[0]
-                if topic_data:
-                    parsed = TOPIC_PARSER_MAP[topic].parse(topic_data)
-                    input_data.update(parsed)
-            # 依赖其他模块输出
-            deps = MODULE_DEPENDENCIES.get(module, [])
-            for dep in deps:
-                dep_input = self.get_module_input(station_id, dep)
-                if dep_input:
-                    input_data.update(dep_input)
-            return self.parsers[module].parse(input_data)
+        # 整合该场站所有topic窗口数据，组装为模块输入，窗口不足自动补零或插值
+        def pad_or_interp(seq, target_len, pad_value=0):
+            n = len(seq)
+            if n == 0:
+                if self.padding_strategy == "zero":
+                    return [0] * target_len
+                elif self.padding_strategy == "linear":
+                    return [0] * target_len
+                elif self.padding_strategy == "forward":
+                    return [pad_value] * target_len
+                elif self.padding_strategy == "missing":
+                    return [None] * target_len
+            if n >= target_len:
+                return seq[-target_len:]
+            if self.padding_strategy == "zero":
+                if isinstance(seq[0], (int, float)):
+                    return [0] * (target_len - n) + seq
+                else:
+                    return [0] * (target_len - n) + seq
+            elif self.padding_strategy == "linear":
+                if isinstance(seq[0], (int, float)):
+                    import numpy as np
+
+                    try:
+                        with self.lock:
+                            if station_id not in self.data_cache:
+                                return None
+                            input_data = {}
+                            for topic in MODULE_TO_TOPICS.get(module, []):
+                                window = self.get_topic_window(station_id, topic)
+                                win_size = TOPIC_DETAIL.get(topic, {}).get(
+                                    "window_size", 1
+                                )
+                                if window:
+                                    try:
+                                        parsed_list = [
+                                            TOPIC_PARSER_MAP[topic].parse(d)
+                                            for d in window
+                                        ]
+                                    except Exception as e:
+                                        handle_error(
+                                            DispatcherError(e),
+                                            context=f"topic解析 topic={topic}, station_id={station_id}",
+                                        )
+                                        parsed_list = []
+                                    # 字段聚合
+                                    field_buf = {}
+                                    for parsed in parsed_list:
+                                        for k, v in parsed.items():
+                                            field_buf.setdefault(k, []).append(v)
+                                    for k, seq in field_buf.items():
+                                        padded = pad_or_interp(seq, win_size)
+                                        input_data[f"{k}_window"] = padded
+                                        input_data[k] = padded[-1] if padded else None
+                                else:
+                                    # 全部补零
+                                    for f in TOPIC_DETAIL.get(topic, {}).get(
+                                        "fields", []
+                                    ):
+                                        input_data[f"{f}_window"] = [0] * win_size
+                                        input_data[f] = 0
+                            # 依赖其他模块输出
+                            deps = MODULE_DEPENDENCIES.get(module, [])
+                            for dep in deps:
+                                try:
+                                    dep_input = self.get_module_input(station_id, dep)
+                                    if dep_input:
+                                        input_data.update(dep_input)
+                                except Exception as e:
+                                    handle_error(
+                                        DispatcherError(e),
+                                        context=f"依赖聚合 module={module}, dep={dep}, station_id={station_id}",
+                                    )
+                            try:
+                                return self.parsers[module].parse(input_data)
+                            except Exception as e:
+                                handle_error(
+                                    DispatcherError(e),
+                                    context=f"模块解析 module={module}, station_id={station_id}",
+                                )
+                                return None
+                    except Exception as e:
+                        handle_error(
+                            DispatcherError(e),
+                            context=f"模块输入组装 module={module}, station_id={station_id}",
+                        )
+                        return None
 
     def get_all_outputs(self, station_id):
-        # 获取指定场站所有模块的输出
         with self.lock:
             if station_id not in self.data_cache:
                 return {}
-            return {m: self.get_module_input(station_id, m) for m in self.parsers.keys()}
+            return {
+                m: self.get_module_input(station_id, m) for m in self.parsers.keys()
+            }
 
     def clean_expired(self):
-        # 清理过期数据，防止内存泄漏
         now = time.time()
         with self.lock:
             expired_stations = []
             for station_id, topic_map in self.data_cache.items():
-                for t, (data, ts) in topic_map.items():
-                    if data and now - ts > self.data_expire_seconds:
-                        topic_map[t] = (None, 0)
+                for t, dq in topic_map.items():
+                    # 移除过期数据
+                    while dq and now - dq[0][1] > self.data_expire_seconds:
+                        dq.popleft()
                 # 如果所有topic都无数据则移除场站
-                if all(v[0] is None for v in topic_map.values()):
+                if all(len(dq) == 0 for dq in topic_map.values()):
                     expired_stations.append(station_id)
             for sid in expired_stations:
                 del self.data_cache[sid]

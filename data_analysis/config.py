@@ -13,52 +13,62 @@ TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {
         'fields': ['station_id', 'station_temp', 'lat', 'lng', 'gun_count', 'grid_capacity', 'storage_count', 'storage_capacity', 'host_id'],
         'frequency': '新建站或配置更改时',
-        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model']
+        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
+        'window_size': 1
     },
     'SCHEDULE-STATION-REALTIME-DATA': {
         'fields': ['station_id', 'gun_id', 'history_curve_gun_avg', 'history_curve_gun_max', 'history_curve_station_avg', 'history_curve_station_max'],
         'frequency': '1分钟1次，推送7天',
-        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model']
+        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
+        'window_size': 7*24*60
     },
     'SCHEDULE-ENVIRONMENT-CALENDAR': {
         'fields': ['workday_code', 'holiday_code'],
         'frequency': '1年1次',
-        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model']
+        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
+        'window_size': 1
     },
     'SCHEDULE-DEVICE-METER': {
         'fields': ['meter_id', 'current_power', 'rated_power_limit'],
         'frequency': '5分钟1次',
-        'modules': ['operation_optimization', 'electricity_price']
+        'modules': ['operation_optimization', 'electricity_price'],
+        'window_size': 7*24*12
     },
     'SCHEDULE-DEVICE-GUN': {
         'fields': ['host_id', 'gun_id', 'gun_status'],
         'frequency': '15秒1次',
-        'modules': ['operation_optimization']
+        'modules': ['operation_optimization'],
+        'window_size': 7*24*60*4
     },
     'SCHEDULE-CAR-ORDER': {
         'fields': ['station_id', 'order_id', 'charger_id', 'gun_id', 'charger_rated_current', 'start_time', 'end_time', 'start_SOC', 'current_SOC', 'demand_voltage', 'demand_current', 'mileage', 'car_model', 'battery_capacity'],
         'frequency': '1秒1次',
-        'modules': ['load_prediction', 'operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model']
+        'modules': ['load_prediction', 'operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
+        'window_size': 7*24*60*60
     },
     'SCHEDULE-CAR-PRICE': {
         'fields': ['station_id', 'period_no', 'start_time', 'end_time', 'period_type', 'grid_price', 'service_fee'],
         'frequency': '1月1次',
-        'modules': ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management']
+        'modules': ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management'],
+        'window_size': 1
     },
     'SCHEDULE-DEVICE-ERROR': {
         'fields': ['station_id', 'host_error', 'ac_error', 'dc_error', 'terminal_error', 'storage_error'],
         'frequency': '触发推送',
-        'modules': ['operation_optimization', 'SOH_model']
+        'modules': ['operation_optimization', 'SOH_model'],
+        'window_size': 10
     },
     'SCHEDULE-DEVICE-HOST': {
         'fields': ['host_id', 'acdc_status', 'dcdc_input_power', 'acdc_input_power'],
         'frequency': '充电时1秒1次，非充电15秒1次',
-        'modules': ['evaluation_model', 'thermal_management']
+        'modules': ['evaluation_model', 'thermal_management'],
+        'window_size': 7*24*60*60
     },
     'SCHEDULE-DEVICE-STORAGE': {
         'fields': ['host_id', 'storage_id', 'storage_power', 'storage_current', 'storage_temp_max', 'storage_temp_min', 'storage_SOC', 'storage_SOH'],
         'frequency': '15秒1次',
-        'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization']
+        'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization'],
+        'window_size': 7*24*60*4
     },
 }
 

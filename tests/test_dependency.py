@@ -1,0 +1,14 @@
+from data_analysis.dispatcher import DataDispatcher
+from data_analysis.config import TOPIC_DETAIL
+
+def test_dependency_aggregation():
+    dispatcher = DataDispatcher(data_expire_seconds=60)
+    station_id = 'test_station_dep'
+    # operation_optimization依赖load_prediction
+    topic = 'SCHEDULE-STATION-PARAM'
+    dispatcher.update_topic_data(station_id, topic, {'station_id': 1, 'station_temp': 25, 'lat': 0, 'lng': 0, 'gun_count': 1, 'grid_capacity': 1, 'storage_count': 1, 'storage_capacity': 1, 'host_id': 1})
+    result = dispatcher.get_module_input(station_id, 'operation_optimization')
+    assert result is not None
+    # 检查依赖字段是否聚合
+    assert 'station_temp' in result
+    assert 'station_temp_window' in result
