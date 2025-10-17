@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:10:17
+project: data_analysis
+filename: parser_base.py
+version: 1.0
+"""
+
 # 解析器基类
 from abc import ABC, abstractmethod
 

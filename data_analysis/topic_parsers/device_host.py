@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:08:47
+project: data_analysis
+filename: device_host.py
+version: 1.0
+"""
+
 from ..parser_base import ParserBase
 
 class DeviceHostParser(ParserBase):

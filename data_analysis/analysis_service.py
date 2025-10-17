@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:09:32
+project: data_analysis
+filename: analysis_service.py
+version: 1.0
+"""
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import logging

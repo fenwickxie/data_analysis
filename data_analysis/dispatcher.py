@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:09:54
+project: data_analysis
+filename: dispatcher.py
+version: 1.0
+"""
+
 # 数据分发与依赖处理
 from .config import MODULE_DEPENDENCIES
 from .parsers import *

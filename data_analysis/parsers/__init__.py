@@ -1,3 +1,15 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:04:03
+project: data_analysis
+filename: __init__.py
+version: 1.0
+"""
+
+
 # 解析器包
 from .electricity_price_parser import ElectricityPriceParser
 from .load_prediction_parser import LoadPredictionParser

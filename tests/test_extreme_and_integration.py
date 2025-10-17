@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:11:01
+project: data_analysis
+filename: test_extreme_and_integration.py
+version: 1.0
+"""
+
 import pytest
 import asyncio
 import threading

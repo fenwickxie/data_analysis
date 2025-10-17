@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:10:37
+project: data_analysis
+filename: test_dependency.py
+version: 1.0
+"""
+
 from data_analysis.dispatcher import DataDispatcher
 from data_analysis.config import TOPIC_DETAIL
 

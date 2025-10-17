@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:08:11
+project: data_analysis
+filename: __init__.py
+version: 1.0
+"""
+
 from .station_param import StationParamParser
 from .station_realtime_data import StationRealtimeDataParser
 from .environment_calendar import EnvironmentCalendarParser

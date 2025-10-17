@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:10:00
+project: data_analysis
+filename: kafka_client.py
+version: 1.0
+"""
+
 # Kafka消费客户端封装
 from kafka import KafkaConsumer
 from kafka import KafkaProducer

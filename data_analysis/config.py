@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:09:43
+project: data_analysis
+filename: config.py
+version: 1.0
+"""
+
 # 配置文件：Kafka、topic、模块依赖
 
 

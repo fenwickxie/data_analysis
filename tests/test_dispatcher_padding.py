@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:10:45
+project: data_analysis
+filename: test_dispatcher_padding.py
+version: 1.0
+"""
+
 import pytest
 from data_analysis.dispatcher import DataDispatcher
 

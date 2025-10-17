@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+author: xie.fangyu
+date: 2025-10-16 11:10:30
+project: data_analysis
+filename: test_async_service.py
+version: 1.0
+"""
+
 import pytest
 import asyncio
 from data_analysis.analysis_service import AsyncDataAnalysisService
