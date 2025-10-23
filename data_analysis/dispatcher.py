@@ -108,7 +108,7 @@ class DataDispatcher:
         # 多场站窗口缓存: {station_id: {topic: deque[(data, ts)]}}
         self.data_cache = {}
         self.data_expire_seconds = data_expire_seconds
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.padding_strategy = "zero"  # 默认零填充
 
     def update_topic_data(self, station_id, topic, raw_data):
@@ -152,6 +152,7 @@ class DataDispatcher:
     def get_module_input(self, station_id, module):
         # 整合该场站所有topic窗口数据，组装为模块输入，窗口不足自动补零或插值
         def pad_or_interp(seq, target_len, pad_value=0):
+            """Pad or interpolate a sequence to target length according to current strategy."""
             n = len(seq)
             if n == 0:
                 if self.padding_strategy == "zero":
@@ -172,71 +173,78 @@ class DataDispatcher:
             elif self.padding_strategy == "linear":
                 if isinstance(seq[0], (int, float)):
                     import numpy as np
-
+                    x = np.arange(n)
+                    xp = np.linspace(0, n-1, target_len)
+                    y = np.array(seq)
+                    return list(np.interp(xp, x, y))
+                else:
+                    return [seq[0]] * (target_len - n) + seq
+            elif self.padding_strategy == "forward":
+                return [seq[0]] * (target_len - n) + seq
+            elif self.padding_strategy == "missing":
+                return [None] * (target_len - n) + seq
+            return seq
+        
+        try:
+            with self.lock:
+                if station_id not in self.data_cache:
+                    return None
+                input_data = {}
+                for topic in MODULE_TO_TOPICS.get(module, []):
+                    window = self.get_topic_window(station_id, topic)
+                    win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
+                    if window:
+                        try:
+                            parsed_list = [
+                                TOPIC_PARSER_MAP[topic].parse(d)
+                                for d in window
+                            ]
+                        except Exception as e:
+                            handle_error(
+                                DispatcherError(e),
+                                context=f"topic解析 topic={topic}, station_id={station_id}",
+                            )
+                            parsed_list = []
+                        # 字段聚合
+                        field_buf = {}
+                        for parsed in parsed_list:
+                            for k, v in parsed.items():
+                                field_buf.setdefault(k, []).append(v)
+                        for k, seq in field_buf.items():
+                            padded = pad_or_interp(seq, win_size)
+                            input_data[f"{k}_window"] = padded
+                            input_data[k] = padded[-1] if padded else None
+                    else:
+                        # 全部补零
+                        for f in TOPIC_DETAIL.get(topic, {}).get("fields", []):
+                            input_data[f"{f}_window"] = [0] * win_size
+                            input_data[f] = 0
+                # 依赖其他模块输出
+                deps = MODULE_DEPENDENCIES.get(module, [])
+                for dep in deps:
                     try:
-                        with self.lock:
-                            if station_id not in self.data_cache:
-                                return None
-                            input_data = {}
-                            for topic in MODULE_TO_TOPICS.get(module, []):
-                                window = self.get_topic_window(station_id, topic)
-                                win_size = TOPIC_DETAIL.get(topic, {}).get(
-                                    "window_size", 1
-                                )
-                                if window:
-                                    try:
-                                        parsed_list = [
-                                            TOPIC_PARSER_MAP[topic].parse(d)
-                                            for d in window
-                                        ]
-                                    except Exception as e:
-                                        handle_error(
-                                            DispatcherError(e),
-                                            context=f"topic解析 topic={topic}, station_id={station_id}",
-                                        )
-                                        parsed_list = []
-                                    # 字段聚合
-                                    field_buf = {}
-                                    for parsed in parsed_list:
-                                        for k, v in parsed.items():
-                                            field_buf.setdefault(k, []).append(v)
-                                    for k, seq in field_buf.items():
-                                        padded = pad_or_interp(seq, win_size)
-                                        input_data[f"{k}_window"] = padded
-                                        input_data[k] = padded[-1] if padded else None
-                                else:
-                                    # 全部补零
-                                    for f in TOPIC_DETAIL.get(topic, {}).get(
-                                        "fields", []
-                                    ):
-                                        input_data[f"{f}_window"] = [0] * win_size
-                                        input_data[f] = 0
-                            # 依赖其他模块输出
-                            deps = MODULE_DEPENDENCIES.get(module, [])
-                            for dep in deps:
-                                try:
-                                    dep_input = self.get_module_input(station_id, dep)
-                                    if dep_input:
-                                        input_data.update(dep_input)
-                                except Exception as e:
-                                    handle_error(
-                                        DispatcherError(e),
-                                        context=f"依赖聚合 module={module}, dep={dep}, station_id={station_id}",
-                                    )
-                            try:
-                                return self.parsers[module].parse(input_data)
-                            except Exception as e:
-                                handle_error(
-                                    DispatcherError(e),
-                                    context=f"模块解析 module={module}, station_id={station_id}",
-                                )
-                                return None
+                        dep_input = self.get_module_input(station_id, dep)
+                        if dep_input:
+                            input_data.update(dep_input)
                     except Exception as e:
                         handle_error(
                             DispatcherError(e),
-                            context=f"模块输入组装 module={module}, station_id={station_id}",
+                            context=f"依赖聚合 module={module}, dep={dep}, station_id={station_id}",
                         )
-                        return None
+                try:
+                    return self.parsers[module].parse(input_data)
+                except Exception as e:
+                    handle_error(
+                        DispatcherError(e),
+                        context=f"模块解析 module={module}, station_id={station_id}",
+                    )
+                    return None
+        except Exception as e:
+            handle_error(
+                DispatcherError(e),
+                context=f"模块输入组装 module={module}, station_id={station_id}",
+            )
+            return None
 
     def get_all_outputs(self, station_id):
         with self.lock:

@@ -11,7 +11,6 @@ version: 1.0
 
 import logging
 import traceback
-from .analysis_service import DataAnalysisService, AsyncDataAnalysisService
 
 # 统一异常定义
 class DataAnalysisError(Exception):
@@ -51,3 +50,15 @@ logging.basicConfig(
         logging.FileHandler("data_analysis.log", encoding="utf-8"),
     ],
 )
+
+# 延迟导入避免循环依赖
+from .analysis_service import DataAnalysisService, AsyncDataAnalysisService
+
+__all__ = [
+    'DataAnalysisService',
+    'AsyncDataAnalysisService',
+    'DataAnalysisError',
+    'KafkaConnectionError',
+    'DispatcherError',
+    'handle_error',
+]

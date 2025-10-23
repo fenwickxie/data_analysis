@@ -304,6 +304,30 @@ async def my_callback(station_id, module_input):
 
 ### Kafka配置 (KAFKA_CONFIG)
 
+#### 嵌套格式（推荐）
+
+```python
+KAFKA_CONFIG = {
+    'consumer': {
+        'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
+        'group_id': 'data_analysis_group',        # 消费者组ID
+        'auto_offset_reset': 'latest',            # 消费策略：latest/earliest
+        'enable_auto_commit': True,               # 是否自动提交offset
+        'max_poll_records': 500,                  # 单次拉取最大记录数
+        'session_timeout_ms': 30000,              # 会话超时时间(毫秒)
+    },
+    'producer': {
+        'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
+        'acks': 'all',                            # 消息确认模式：all/1/0
+        'retries': 3,                             # 发送失败重试次数
+        'max_in_flight_requests_per_connection': 5,  # 单连接未确认请求数
+        'compression_type': 'gzip',               # 压缩类型：gzip/snappy/lz4
+    }
+}
+```
+
+#### 扁平格式（向后兼容）
+
 ```python
 KAFKA_CONFIG = {
     'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
@@ -314,10 +338,26 @@ KAFKA_CONFIG = {
 ```
 
 **参数说明**:
+
+**消费者配置 (consumer)**:
 - `bootstrap_servers`: Kafka集群地址列表，格式为['host1:port1', 'host2:port2']
 - `group_id`: 消费者组ID，用于标识消费者组
 - `auto_offset_reset`: 消费策略，'latest'从最新数据开始，'earliest'从最早数据开始
 - `enable_auto_commit`: 是否自动提交消费offset
+- `max_poll_records`: 单次poll拉取的最大记录数，默认500
+- `session_timeout_ms`: 会话超时时间，默认30000毫秒
+
+**生产者配置 (producer)**:
+- `bootstrap_servers`: Kafka集群地址列表
+- `acks`: 消息确认模式，'all'等待所有副本确认（最安全），'1'等待leader确认，'0'不等待确认
+- `retries`: 发送失败后的重试次数，默认3
+- `max_in_flight_requests_per_connection`: 单连接未确认请求数，默认5
+- `compression_type`: 消息压缩类型，可选'gzip'/'snappy'/'lz4'/'none'
+
+**格式说明**:
+- 优先使用嵌套格式，可以为消费者和生产者分别配置参数
+- 扁平格式主要用于向后兼容，系统会自动适配
+- 嵌套格式下，consumer和producer配置互不影响
 
 ### Topic配置 (TOPIC_DETAIL)
 

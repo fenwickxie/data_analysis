@@ -7,6 +7,7 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 ## 背景与目标用户
 
 本模块主要面向充电站运营平台的数据处理需求，支持多种业务场景，包括负荷预测、运营优化、电价策略、热管理、客户挖掘等。目标用户包括：
+
 - 充电站运营平台开发团队
 - 数据分析工程师
 - 机器学习模型开发人员
@@ -15,33 +16,45 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 ## 安装说明
 
 ### 环境要求
-- Python 3.7+
+
+- Python 3.10+
 - Kafka集群（用于数据输入/输出）
 
 ### 安装步骤
 
 1. 克隆仓库：
+   
    ```bash
    git clone [仓库地址]
    cd data_analysis
    ```
-
 2. 安装依赖：
+   
    ```bash
    pip install -r requirements.txt
    ```
-
 3. 配置Kafka连接（在`data_analysis/config.py`中修改`KAFKA_CONFIG`）：
+   
    ```python
    KAFKA_CONFIG = {
        'bootstrap_servers': ['your_kafka_server:9092'],
-       'group_id': 'your_group_id',
-       'auto_offset_reset': 'latest',
-       'enable_auto_commit': True,
+       'consumer': {
+           'group_id': 'your_group_id',
+           'auto_offset_reset': 'latest',
+           'enable_auto_commit': True,
+       },
+       'producer': {
+           # 生产者配置
+       }
    }
    ```
-
+   
+   **注意**：配置支持两种格式：
+   
+   - 嵌套格式（推荐）：consumer/producer 配置分别放在子字典中
+   - 扁平格式（兼容）：直接在顶层配置 group_id 等参数
 4. 运行示例：
+   
    ```bash
    # 同步示例
    python data_analysis/main.py
@@ -59,32 +72,33 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
   - kafka_producer.py   # Kafka生产封装
   - parser_base.py      # 解析器基类
   - topic_parsers/      # 各topic原始数据解析器
-      - __init__.py
-      - station_param.py
-      - station_realtime_data.py
-      - environment_calendar.py
-      - device_meter.py
-      - device_gun.py
-      - car_order.py
-      - car_price.py
-      - device_error.py
-      - device_host.py
-      - device_storage.py
+    - __init__.py
+    - station_param.py
+    - station_realtime_data.py
+    - environment_calendar.py
+    - device_meter.py
+    - device_gun.py
+    - car_order.py
+    - car_price.py
+    - device_error.py
+    - device_host.py
+    - device_storage.py
   - parsers/            # 各业务模块数据整合器
-      - __init__.py
-      - electricity_price_parser.py
-      - load_prediction_parser.py
-      - pv_prediction_parser.py
-      - thermal_management_parser.py
-      - station_guidance_parser.py
-      - evaluation_model_parser.py
-      - SOH_model_parser.py
-      - operation_optimization_parser.py
-      - customer_mining_parser.py
+    - __init__.py
+    - electricity_price_parser.py
+    - load_prediction_parser.py
+    - pv_prediction_parser.py
+    - thermal_management_parser.py
+    - station_guidance_parser.py
+    - evaluation_model_parser.py
+    - SOH_model_parser.py
+    - operation_optimization_parser.py
+    - customer_mining_parser.py
   - dispatcher.py       # 数据分发与依赖处理
   - main.py             # 启动入口
 
 ## 主要功能
+
 - Kafka消费与topic订阅，topic与模块多对多映射
 - topic原始数据解析与整合
 - 跨模块数据依赖处理
@@ -96,40 +110,69 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 ### 核心配置文件：`data_analysis/config.py`
 
 1. **Kafka配置**：
+   
+   **推荐的嵌套格式**（更清晰，便于管理）：
+   
    ```python
    KAFKA_CONFIG = {
-       'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址
-       'group_id': 'data_analysis_group',         # 消费者组ID
-       'auto_offset_reset': 'latest',             # 消费策略：latest/earliest
-       'enable_auto_commit': True,               # 是否自动提交offset
+       'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
+       'consumer': {
+           'group_id': 'data_analysis_group',         # 消费者组ID
+           'auto_offset_reset': 'latest',             # 消费策略：latest/earliest
+           'enable_auto_commit': True,                # 是否自动提交offset
+           'max_poll_records': 3000,                  # 单次poll最大记录数
+       },
+       'producer': {
+           'key_serializer': 'org.apache.kafka.common.serialization.StringSerializer',
+           'value_serializer': 'org.apache.kafka.common.serialization.StringSerializer',
+       },
+       'listener': {
+           'ack-mode': 'manual',                      # 应答模式
+           'type': 'batch',                           # 批处理类型
+           'missing-topics-fatal': False,             # topic缺失是否致命
+       }
    }
    ```
-
+   
+   **兼容的扁平格式**（向后兼容）：
+   
+   ```python
+   KAFKA_CONFIG = {
+       'bootstrap_servers': ['localhost:9092'],
+       'group_id': 'data_analysis_group',
+       'auto_offset_reset': 'latest',
+       'enable_auto_commit': True,
+   }
+   ```
+   
+   系统会自动兼容两种格式，优先读取嵌套配置，如果不存在则回退到扁平配置。
 2. **Topic配置**：
+   
    - `TOPIC_DETAIL`：每个topic的详细配置，包括字段、推送频率、依赖模块和数据窗口大小
    - `TOPIC_TO_MODULES`：topic到业务模块的多对多映射
    - `MODULE_TO_TOPICS`：业务模块到topic的多对多映射
    - `MODULE_DEPENDENCIES`：模块间的依赖关系
-
 3. **数据窗口配置**：
+   
    - 每个topic的`window_size`定义了数据缓存窗口大小
    - 窗口大小根据数据频率和业务需求设定，例如高频数据(15秒)可能需要更大的窗口
 
 ### 服务配置
 
 1. **数据过期时间**：
+   
    ```python
    # 在初始化服务时设置
    service = DataAnalysisService(data_expire_seconds=600)  # 数据10分钟后过期
    ```
-
 2. **输出Topic配置**：
+   
    ```python
    # 输出Topic前缀
    service = DataAnalysisService(output_topic_prefix="MODULE-OUTPUT-")
    ```
-
 3. **窗口补全策略**：
+   
    - 'zero'：补零（默认）
    - 'linear'：线性插值
    - 'forward'：前向填充
@@ -140,26 +183,27 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 ### 常见问题及解决方案
 
 1. **Kafka连接失败**：
+   
    - 检查`KAFKA_CONFIG`中的`bootstrap_servers`是否正确
    - 确认Kafka服务是否正常运行
    - 检查网络连接和防火墙设置
-
 2. **数据解析错误**：
+   
    - 检查topic数据格式是否符合预期
    - 确认字段名称是否与配置一致
    - 查看日志中的具体错误信息
-
 3. **内存占用过高**：
+   
    - 调整`data_expire_seconds`减少数据缓存时间
    - 优化窗口大小，避免不必要的历史数据存储
    - 增加系统可用内存或调整JVM参数（如使用Kafka Java客户端时）
-
 4. **数据分发延迟**：
+   
    - 检查Kafka生产者配置
    - 考虑增加消费者并行度
    - 优化回调函数处理逻辑
-
 5. **模块依赖问题**：
+   
    - 检查`MODULE_DEPENDENCIES`配置是否正确
    - 确认依赖模块是否正常输出数据
    - 查看依赖解析相关的日志
@@ -167,6 +211,7 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 ### 日志查看
 
 日志文件默认保存在`data_analysis.log`中，包含以下关键信息：
+
 - Kafka连接状态
 - 数据处理过程
 - 错误和异常信息
@@ -177,27 +222,100 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 ## 性能优化建议
 
 1. **多场站并发处理**：
+   
    - 同步服务：调整`ThreadPoolExecutor`的`max_workers`参数
    - 异步服务：利用asyncio的并发能力，适当增加事件循环并发数
-
 2. **内存优化**：
+   
    - 合理设置数据窗口大小，避免不必要的历史数据存储
    - 定期清理过期数据，调用`clean_expired()`方法
    - 使用高效的数据结构，如`deque`实现滑动窗口
-
 3. **Kafka优化**：
+   
    - 根据数据量调整`batch_size`和`linger_ms`参数
    - 使用压缩减少网络传输开销
    - 合理分区，提高并行处理能力
-
 4. **批处理优化**：
+   
    - 对于高频数据，考虑适当降低处理频率
    - 实现批处理回调，减少单条数据处理开销
-
 5. **资源监控**：
+   
    - 监控内存使用情况，及时调整缓存策略
    - 跟踪Kafka消费/生产速率，平衡处理能力
    - 监控CPU使用率，优化计算密集型任务
+
+## 配置最佳实践
+
+### Kafka配置建议
+
+1. **开发环境**：
+   
+   ```python
+   KAFKA_CONFIG = {
+       'bootstrap_servers': ['localhost:9092'],
+       'consumer': {
+           'group_id': 'dev_group',
+           'auto_offset_reset': 'earliest',  # 从头开始消费，便于调试
+           'enable_auto_commit': True,
+       }
+   }
+   ```
+2. **生产环境**：
+   
+   ```python
+   KAFKA_CONFIG = {
+       'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],  # 多节点高可用
+       'consumer': {
+           'group_id': 'prod_group',
+           'auto_offset_reset': 'latest',  # 只消费最新数据
+           'enable_auto_commit': False,    # 手动提交，确保数据不丢失
+           'max_poll_records': 3000,
+       },
+       'producer': {
+           'compression_type': 'gzip',     # 启用压缩
+           'acks': 'all',                  # 等待所有副本确认
+       }
+   }
+   ```
+3. **配置验证**：
+   
+   ```python
+   # 在应用启动时验证配置
+   def validate_config(config):
+       assert 'bootstrap_servers' in config, "缺少 bootstrap_servers 配置"
+       assert isinstance(config['bootstrap_servers'], list), "bootstrap_servers 必须是列表"
+       # 兼容嵌套和扁平格式
+       consumer_config = config.get('consumer', config)
+       assert 'group_id' in consumer_config, "缺少 group_id 配置"
+   ```
+
+### 窗口大小配置建议
+
+根据数据频率和业务需求合理设置窗口大小：
+
+```python
+TOPIC_DETAIL = {
+    'SCHEDULE-STATION-REALTIME-DATA': {
+        'window_size': 7*24*60,  # 1分钟频率，7天数据 = 10080条
+        # 内存占用估算：假设每条100字节，约1MB/场站
+    },
+    'SCHEDULE-DEVICE-GUN': {
+        'window_size': 7*24*60*4,  # 15秒频率，7天数据 = 40320条
+        # 高频数据，注意内存占用
+    },
+    'SCHEDULE-STATION-PARAM': {
+        'window_size': 1,  # 静态配置，只保留最新值
+    }
+}
+```
+
+**窗口大小调整原则**：
+
+- 低频数据（小时级）：保留更长时间（数周到数月）
+- 中频数据（分钟级）：保留中等时间（数天到一周）
+- 高频数据（秒级）：保留较短时间（数小时到一天）
+- 根据实际内存容量和场站数量动态调整
 
 ## topic与模块映射
 
@@ -214,14 +332,12 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 | SCHEDULE-DEVICE-HOST         | host_id, acdc_status, ... | 1秒/15秒 | evaluation_model, thermal_management |
 | SCHEDULE-DEVICE-STORAGE      | host_id, storage_id, ... | 15秒1次 | evaluation_model, thermal_management, electricity_price, operation_optimization |
 
-
 ## 数据流转说明
 
 1. data_analysis模块从Kafka消费所有topic，按topic类型用topic_parsers解析原始数据。
 2. dispatcher按场站缓存所有topic数据，自动整合为各业务模块所需结构（见parsers/）。
-3. 各业务模块输入数据可上传到Kafka，供下游模型直接消费。
+3. 各业务模块输出数据可上传到Kafka，供下游模型直接消费。
 4. 支持多场站并发、内存自动清理、易于扩展。
-
 
 ## 嵌入式用法示例
 
@@ -280,11 +396,13 @@ if __name__ == "__main__":
 ## 同步/异步API兼容性与迁移说明
 
 ### 1. API兼容性
+
 - 同步API（DataAnalysisService）适合传统阻塞/多线程场景，接口为阻塞式回调。
 - 异步API（AsyncDataAnalysisService）基于asyncio，支持高并发、异步回调、异步Kafka、异步上传。
 - 两者均支持多场站、窗口补全/插值、依赖聚合、自动上传Kafka、健康监控、配置热更新。
 
 ### 2. 迁移与混用建议
+
 - 推荐新项目/云原生/高并发场景优先使用异步API。
 - 迁移方式：
   - 回调函数由同步def改为async def，内部可await模型推理/IO。
@@ -293,6 +411,7 @@ if __name__ == "__main__":
 - 同步/异步不可直接混用（如同一场站/同一Kafka group），如需混用请确保topic、group_id、端口等配置隔离。
 
 ### 3. 注意事项
+
 - 异步API需在asyncio事件循环中运行。
 - 异步回调支持await任意异步操作，适合模型推理、远程调用等高并发场景。
 - 同步API适合遗留系统或对异步无需求场景。
@@ -303,6 +422,7 @@ if __name__ == "__main__":
 ## 贡献指南
 
 我们欢迎任何形式的贡献，包括但不限于：
+
 - 报告bug
 - 提出功能建议
 - 改进文档
@@ -311,19 +431,20 @@ if __name__ == "__main__":
 ### 开发环境设置
 
 1. 克隆仓库并创建开发分支：
+   
    ```bash
    git clone [仓库地址]
    cd data_analysis
    git checkout -b feature/your-feature-name
    ```
-
 2. 安装开发依赖：
+   
    ```bash
    pip install -r requirements.txt
    pip install pytest black flake8  # 测试和代码格式化工具
    ```
-
 3. 运行测试：
+   
    ```bash
    pytest tests/
    ```
@@ -346,6 +467,7 @@ if __name__ == "__main__":
 ### 提交信息规范
 
 提交信息应遵循以下格式：
+
 ```
 <类型>(<范围>): <描述>
 
@@ -355,6 +477,7 @@ if __name__ == "__main__":
 ```
 
 类型包括：
+
 - feat: 新功能
 - fix: 修复bug
 - docs: 文档更新
@@ -366,6 +489,7 @@ if __name__ == "__main__":
 ## 版本历史
 
 ### v1.0.0 (2025-10-15)
+
 - 初始版本发布
 - 实现基本的数据解析和分发功能
 - 支持同步和异步两种API
@@ -375,7 +499,9 @@ if __name__ == "__main__":
 - 支持配置热更新
 
 ### 计划中的功能
+
 - v1.1.0: 添加更多数据窗口补全策略
 - v1.2.0: 增强监控和日志功能
 - v1.3.0: 支持分布式部署
 - v2.0.0: 实现插件化架构
+

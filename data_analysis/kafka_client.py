@@ -32,12 +32,13 @@ class KafkaConsumerClient:
         import time
         for i in range(self.max_retries):
             try:
+                consumer_config = self.config.get('consumer', {})
                 self.consumer = KafkaConsumer(
                     *self.topics,
                     bootstrap_servers=self.config['bootstrap_servers'],
-                    group_id=self.config['group_id'],
-                    auto_offset_reset=self.config.get('auto_offset_reset', 'latest'),
-                    enable_auto_commit=self.config.get('enable_auto_commit', True),
+                    group_id=consumer_config.get('group_id', self.config.get('group_id', 'default-group')),
+                    auto_offset_reset=consumer_config.get('auto_offset_reset', self.config.get('auto_offset_reset', 'latest')),
+                    enable_auto_commit=consumer_config.get('enable_auto_commit', self.config.get('enable_auto_commit', True)),
                     value_deserializer=lambda m: json.loads(m.decode('utf-8'))
                 )
                 return
@@ -129,13 +130,14 @@ class AsyncKafkaConsumerClient:
         self.consumer = None
 
     async def start(self):
+        consumer_config = self.config.get('consumer', {})
         self.consumer = AIOKafkaConsumer(
             *self.topics,
             loop=self.loop,
             bootstrap_servers=self.config['bootstrap_servers'],
-            group_id=self.config['group_id'],
-            auto_offset_reset=self.config.get('auto_offset_reset', 'latest'),
-            enable_auto_commit=self.config.get('enable_auto_commit', True),
+            group_id=consumer_config.get('group_id', self.config.get('group_id', 'default-group')),
+            auto_offset_reset=consumer_config.get('auto_offset_reset', self.config.get('auto_offset_reset', 'latest')),
+            enable_auto_commit=consumer_config.get('enable_auto_commit', self.config.get('enable_auto_commit', True)),
             value_deserializer=lambda m: json.loads(m.decode('utf-8'))
         )
         await self.consumer.start()

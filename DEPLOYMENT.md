@@ -63,6 +63,74 @@ cp data_analysis/config.py /opt/data_analysis/config/
 vim /opt/data_analysis/config/config.py
 ```
 
+**重要配置项说明**：
+
+#### Kafka配置
+
+推荐使用嵌套格式，为消费者和生产者分别配置参数：
+
+```python
+KAFKA_CONFIG = {
+    'consumer': {
+        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
+        'group_id': 'data_analysis_group',
+        'auto_offset_reset': 'latest',
+        'enable_auto_commit': True,
+        'max_poll_records': 500,
+        'session_timeout_ms': 30000,
+        'request_timeout_ms': 40000,
+        'heartbeat_interval_ms': 3000,
+    },
+    'producer': {
+        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
+        'acks': 'all',  # 生产环境建议使用'all'保证数据可靠性
+        'retries': 3,
+        'max_in_flight_requests_per_connection': 5,
+        'compression_type': 'gzip',  # 启用压缩节省网络带宽
+        'linger_ms': 10,  # 批量发送延迟，提高吞吐量
+        'batch_size': 16384,  # 批量大小
+    }
+}
+```
+
+**配置说明**：
+- `bootstrap_servers`: 配置多个Kafka broker地址以支持高可用
+- `acks='all'`: 生产环境建议使用，等待所有副本确认，确保数据不丢失
+- `compression_type='gzip'`: 启用压缩可以节省网络带宽和存储空间
+- `max_poll_records=500`: 根据数据量和处理能力调整，避免消费超时
+
+#### 窗口和补全配置
+
+```python
+# Topic配置中设置窗口大小
+TOPIC_DETAIL = {
+    'REAL-STATION-DATA': {
+        'window_size': 5,  # 根据业务需求设置合适的窗口大小
+        # ...
+    },
+    # ...
+}
+
+# 在服务初始化时设置补全策略
+# 'zero': 补零（默认，适合累计值）
+# 'linear': 线性插值（适合连续变化的数据）
+# 'forward': 前向填充（适合状态数据）
+# 'missing': 标记为缺失（适合需要明确区分缺失数据的场景）
+```
+
+#### 性能相关配置
+
+```python
+# 同步服务：线程池大小
+max_workers = 32  # 根据场站数量和CPU核心数调整
+
+# 数据过期时间
+data_expire_seconds = 600  # 10分钟，根据数据特点调整
+
+# 异步服务：并发任务数
+# 由asyncio自动管理，但需注意系统资源限制
+```
+
 ### 3. 服务启动脚本
 
 创建`/opt/data_analysis/start.sh`（Linux）或`start.bat`（Windows）：
@@ -207,11 +275,22 @@ metadata:
 data:
   config.py: |
     # 配置文件内容
+    # 推荐使用嵌套格式，分别配置消费者和生产者参数
     KAFKA_CONFIG = {
-        'bootstrap_servers': ['kafka-service:9092'],
-        'group_id': 'data_analysis_group',
-        'auto_offset_reset': 'latest',
-        'enable_auto_commit': True,
+        'consumer': {
+            'bootstrap_servers': ['kafka-service:9092'],
+            'group_id': 'data_analysis_group',
+            'auto_offset_reset': 'latest',
+            'enable_auto_commit': True,
+            'max_poll_records': 500,
+            'session_timeout_ms': 30000,
+        },
+        'producer': {
+            'bootstrap_servers': ['kafka-service:9092'],
+            'acks': 'all',
+            'retries': 3,
+            'compression_type': 'gzip',
+        }
     }
 ```
 

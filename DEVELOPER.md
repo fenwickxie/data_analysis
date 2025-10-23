@@ -171,10 +171,10 @@ MODULE_DEPENDENCIES = {
 2. 在`DataDispatcher`中设置补全策略
 
 补全策略包括：
-- 'zero': 补零（默认）
-- 'linear': 线性插值
-- 'forward': 前向填充
-- 'missing': 标记为None
+- 'zero': 补零（默认）- 适合累计值或计数类数据
+- 'linear': 线性插值 - 适合连续变化的物理量（温度、功率等）
+- 'forward': 前向填充 - 适合状态数据或缓慢变化的量
+- 'missing': 标记为None - 适合需要明确区分缺失数据的场景
 
 示例：
 
@@ -182,7 +182,99 @@ MODULE_DEPENDENCIES = {
 # 设置补全策略
 dispatcher = DataDispatcher()
 dispatcher.set_padding_strategy("linear")  # 使用线性插值
+
+# 也可以在初始化服务时指定
+service = DataAnalysisService(
+    kafka_config=KAFKA_CONFIG,
+    topic_detail=TOPIC_DETAIL,
+    module_name="load_prediction",
+    stations=["station1", "station2"],
+    padding_strategy="linear"  # 指定补全策略
+)
 ```
+
+### 配置最佳实践
+
+#### Kafka配置优化
+
+**开发环境配置**:
+```python
+KAFKA_CONFIG = {
+    'consumer': {
+        'bootstrap_servers': ['localhost:9092'],
+        'group_id': 'data_analysis_dev',
+        'auto_offset_reset': 'earliest',  # 开发时从头消费
+        'enable_auto_commit': True,
+        'max_poll_records': 100,  # 开发环境可以减少
+    },
+    'producer': {
+        'bootstrap_servers': ['localhost:9092'],
+        'acks': '1',  # 开发环境可以降低要求
+        'retries': 1,
+        'compression_type': 'none',  # 开发环境可以不压缩
+    }
+}
+```
+
+**生产环境配置**:
+```python
+KAFKA_CONFIG = {
+    'consumer': {
+        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
+        'group_id': 'data_analysis_prod',
+        'auto_offset_reset': 'latest',
+        'enable_auto_commit': True,
+        'max_poll_records': 500,
+        'session_timeout_ms': 30000,
+        'request_timeout_ms': 40000,
+        'heartbeat_interval_ms': 3000,
+        'max_poll_interval_ms': 300000,
+    },
+    'producer': {
+        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
+        'acks': 'all',  # 生产环境必须保证可靠性
+        'retries': 3,
+        'max_in_flight_requests_per_connection': 5,
+        'compression_type': 'gzip',  # 启用压缩
+        'linger_ms': 10,
+        'batch_size': 16384,
+        'buffer_memory': 33554432,
+    }
+}
+```
+
+**配置说明**:
+- 开发环境注重便利性和调试能力
+- 生产环境注重可靠性、性能和容错能力
+- 使用多个broker地址提高高可用性
+- 合理配置超时参数避免频繁重连
+
+#### 窗口大小配置建议
+
+根据数据特点选择合适的窗口大小：
+
+```python
+TOPIC_DETAIL = {
+    'REAL-STATION-DATA': {
+        'window_size': 5,  # 高频数据(每分钟)，5分钟窗口
+        # ...
+    },
+    'SCHEDULE-STATION-PARAM': {
+        'window_size': 1,  # 低频配置数据，1个即可
+        # ...
+    },
+    'STORAGE-DATA': {
+        'window_size': 10,  # 需要历史趋势分析，10个数据点
+        # ...
+    },
+}
+```
+
+**原则**:
+- 高频数据：窗口大小 = 所需时间范围 / 数据间隔
+- 低频数据：通常1-2个数据点即可
+- 需要趋势分析：适当增加窗口大小
+- 内存限制：窗口过大会增加内存消耗，需权衡
 
 ## 性能考虑
 

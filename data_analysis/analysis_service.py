@@ -15,15 +15,14 @@ import logging
 import time
 import threading
 
-from data_analysis import (
+# 使用相对导入避免循环依赖
+from . import (
     DataAnalysisError,
     KafkaConnectionError,
     DispatcherError,
     handle_error,
 )
-from data_analysis.kafka_client import KafkaConsumerClient, KafkaProducerClient
-
-from .kafka_client import AsyncKafkaConsumerClient, AsyncKafkaProducerClient
+from .kafka_client import KafkaConsumerClient, KafkaProducerClient, AsyncKafkaConsumerClient, AsyncKafkaProducerClient
 from .config import KAFKA_CONFIG, TOPIC_TO_MODULES
 from .dispatcher import DataDispatcher
 
