@@ -243,6 +243,54 @@ KAFKA_CONFIG = {
 }
 ```
 
+#### 安全配置（SASL/SSL）示例
+
+- 嵌套（推荐）：
+
+```python
+KAFKA_CONFIG = {
+    'consumer': {
+        'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
+        'group_id': 'prod_group',
+        'security_protocol': 'SASL_SSL',
+        'sasl_mechanism': 'PLAIN',
+        'sasl_plain_username': 'user',
+        'sasl_plain_password': 'pass',
+    },
+    'producer': {
+        'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
+        'acks': 'all',
+        'compression_type': 'gzip',
+        'security_protocol': 'SASL_SSL',
+        'sasl_mechanism': 'PLAIN',
+        'sasl_plain_username': 'user',
+        'sasl_plain_password': 'pass',
+    }
+}
+```
+
+- 扁平（兼容）：
+
+```python
+KAFKA_CONFIG = {
+    'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
+    'group_id': 'prod_group',
+    'security_protocol': 'SASL_SSL',
+    'sasl_mechanism': 'PLAIN',
+    'sasl_plain_username': 'user',
+    'sasl_plain_password': 'pass',
+    # 同步客户端还支持：
+    'ssl_cafile': '/path/ca.pem',
+    'ssl_certfile': '/path/cert.pem',
+    'ssl_keyfile': '/path/key.pem',
+}
+```
+
+参数透传白名单（当前实现）：
+- 消费者：group_id, auto_offset_reset, enable_auto_commit, max_poll_records, session_timeout_ms, request_timeout_ms, heartbeat_interval_ms, max_poll_interval_ms, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
+- 生产者：acks, retries, compression_type, linger_ms, batch_size, max_in_flight_requests_per_connection, buffer_memory, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
+- 异步（aiokafka）消费者/生产者：security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password
+
 **配置说明**:
 - 开发环境注重便利性和调试能力
 - 生产环境注重可靠性、性能和容错能力

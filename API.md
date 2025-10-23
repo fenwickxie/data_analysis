@@ -245,6 +245,77 @@ DataDispatcher(data_expire_seconds=600)
 
 ---
 
+### Kafka 客户端类
+
+以下客户端封装基于 kafka-python/aiokafka，对连接与发送/消费做了重试与序列化处理。
+
+注意：当前实现期望顶层存在 `bootstrap_servers`（扁平格式）。如使用嵌套格式，也请在外层同时提供 `bootstrap_servers` 以保证兼容性。
+
+支持的参数透传（白名单）：
+- 消费者（同步 kafka-python）：group_id, auto_offset_reset, enable_auto_commit, max_poll_records, session_timeout_ms, request_timeout_ms, heartbeat_interval_ms, max_poll_interval_ms, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
+- 生产者（同步 kafka-python）：acks, retries, compression_type, linger_ms, batch_size, max_in_flight_requests_per_connection, buffer_memory, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
+- 异步（aiokafka）消费者/生产者：security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password（常用安全参数）
+
+#### KafkaConsumerClient
+
+```python
+KafkaConsumerClient(topics: list[str], config: dict, max_retries: int = 5, retry_interval: int = 5)
+```
+
+- 参数：
+    - `topics`: 订阅的 topic 列表
+    - `config`: Kafka 配置（需包含 `bootstrap_servers`；`group_id`/`auto_offset_reset`/`enable_auto_commit` 可从 `config['consumer']` 或顶层读取）
+    - `max_retries`: 连接失败重试次数，默认 5
+    - `retry_interval`: 重试间隔秒数，默认 5
+
+- 方法：
+    - `poll(timeout_ms: int = 1000) -> dict`：返回 {TopicPartition: [Message]}
+    - `close() -> None`
+
+- 异常：
+    - 连接/消费异常将以 `KafkaConnectionError` 记录并重试；最终失败抛出异常
+
+#### KafkaProducerClient
+
+```python
+KafkaProducerClient(config: dict, max_retries: int = 5, retry_interval: int = 5)
+```
+
+- 参数：
+    - `config`: Kafka 配置（需包含 `bootstrap_servers`）
+    - `max_retries`/`retry_interval`: 同上
+
+- 方法：
+    - `send(topic: str, value: dict) -> None`：内部 `flush()`；失败自动重试
+    - `close() -> None`
+
+- 异常：
+    - 多次重试仍失败将抛出异常
+
+#### AsyncKafkaConsumerClient
+
+```python
+AsyncKafkaConsumerClient(topics: list[str], config: dict, loop=None)
+```
+
+- 方法：
+    - `await start() -> None`
+    - `await getone() -> Message`
+    - `await stop() -> None`
+
+#### AsyncKafkaProducerClient
+
+```python
+AsyncKafkaProducerClient(config: dict, loop=None)
+```
+
+- 方法：
+    - `await start() -> None`
+    - `await send(topic: str, value: dict) -> None`（send_and_wait）
+    - `await stop() -> None`
+
+---
+
 ### 异常类
 
 #### DataAnalysisError

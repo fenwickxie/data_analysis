@@ -19,6 +19,19 @@ import logging
 
 from .__init__ import handle_error, KafkaConnectionError
 
+def _extract_bootstrap_servers(config: dict, section: str):
+    """Get bootstrap_servers from nested section or top-level for compatibility."""
+    sec = config.get(section, {}) if isinstance(config, dict) else {}
+    bs = None
+    if isinstance(sec, dict):
+        bs = sec.get("bootstrap_servers")
+    return bs if bs is not None else config.get("bootstrap_servers")
+
+
+def _allowed_subset(d: dict, allowed_keys: set):
+    return {k: d[k] for k in allowed_keys if k in d}
+
+
 class KafkaConsumerClient:
     def __init__(self, topics, config, max_retries=5, retry_interval=5):
         self.topics = topics
@@ -32,14 +45,32 @@ class KafkaConsumerClient:
         import time
         for i in range(self.max_retries):
             try:
-                consumer_config = self.config.get('consumer', {})
+                # Build compatible consumer kwargs (nested/flat)
+                consumer_cfg = self.config.get('consumer', {}) if isinstance(self.config, dict) else {}
+                bootstrap = _extract_bootstrap_servers(self.config, 'consumer')
+                if not bootstrap:
+                    raise KeyError("bootstrap_servers 未配置：请在顶层或consumer子配置中提供")
+
+                # Allowed keys for kafka-python KafkaConsumer
+                allowed = {
+                    'group_id', 'auto_offset_reset', 'enable_auto_commit',
+                    'max_poll_records', 'session_timeout_ms', 'request_timeout_ms',
+                    'heartbeat_interval_ms', 'max_poll_interval_ms',
+                    # security
+                    'security_protocol', 'sasl_mechanism', 'sasl_plain_username', 'sasl_plain_password',
+                    'ssl_cafile', 'ssl_certfile', 'ssl_keyfile',
+                }
+                base_kwargs = _allowed_subset(consumer_cfg, allowed)
+                # fallback from top-level if not present
+                for k in list(allowed):
+                    if k not in base_kwargs and k in self.config:
+                        base_kwargs[k] = self.config[k]
+
                 self.consumer = KafkaConsumer(
                     *self.topics,
-                    bootstrap_servers=self.config['bootstrap_servers'],
-                    group_id=consumer_config.get('group_id', self.config.get('group_id', 'default-group')),
-                    auto_offset_reset=consumer_config.get('auto_offset_reset', self.config.get('auto_offset_reset', 'latest')),
-                    enable_auto_commit=consumer_config.get('enable_auto_commit', self.config.get('enable_auto_commit', True)),
-                    value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+                    bootstrap_servers=bootstrap,
+                    value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+                    **base_kwargs,
                 )
                 return
             except Exception as e:
@@ -85,9 +116,28 @@ class KafkaProducerClient:
         import time
         for i in range(self.max_retries):
             try:
+                producer_cfg = self.config.get('producer', {}) if isinstance(self.config, dict) else {}
+                bootstrap = _extract_bootstrap_servers(self.config, 'producer')
+                if not bootstrap:
+                    raise KeyError("bootstrap_servers 未配置：请在顶层或producer子配置中提供")
+
+                # Allowed keys for kafka-python KafkaProducer
+                allowed = {
+                    'acks', 'retries', 'compression_type', 'linger_ms', 'batch_size',
+                    'max_in_flight_requests_per_connection', 'buffer_memory',
+                    # security
+                    'security_protocol', 'sasl_mechanism', 'sasl_plain_username', 'sasl_plain_password',
+                    'ssl_cafile', 'ssl_certfile', 'ssl_keyfile',
+                }
+                base_kwargs = _allowed_subset(producer_cfg, allowed)
+                for k in list(allowed):
+                    if k not in base_kwargs and k in self.config:
+                        base_kwargs[k] = self.config[k]
+
                 self.producer = KafkaProducer(
-                    bootstrap_servers=self.config['bootstrap_servers'],
-                    value_serializer=lambda m: json.dumps(m, ensure_ascii=False).encode('utf-8')
+                    bootstrap_servers=bootstrap,
+                    value_serializer=lambda m: json.dumps(m, ensure_ascii=False).encode('utf-8'),
+                    **base_kwargs,
                 )
                 return
             except Exception as e:
@@ -130,20 +180,37 @@ class AsyncKafkaConsumerClient:
         self.consumer = None
 
     async def start(self):
-        consumer_config = self.config.get('consumer', {})
+        consumer_cfg = self.config.get('consumer', {}) if isinstance(self.config, dict) else {}
+        bootstrap = _extract_bootstrap_servers(self.config, 'consumer')
+        if not bootstrap:
+            raise KeyError("bootstrap_servers 未配置：请在顶层或consumer子配置中提供")
+
+        # Allowed keys for aiokafka AIOKafkaConsumer
+        allowed = {
+            'group_id', 'auto_offset_reset', 'enable_auto_commit',
+            'session_timeout_ms', 'request_timeout_ms', 'heartbeat_interval_ms',
+            'max_poll_records', 'max_poll_interval_ms',
+            # security (AIOKafka常用)
+            'security_protocol', 'sasl_mechanism', 'sasl_plain_username', 'sasl_plain_password',
+        }
+        base_kwargs = _allowed_subset(consumer_cfg, allowed)
+        for k in list(allowed):
+            if k not in base_kwargs and k in self.config:
+                base_kwargs[k] = self.config[k]
+
         self.consumer = AIOKafkaConsumer(
             *self.topics,
             loop=self.loop,
-            bootstrap_servers=self.config['bootstrap_servers'],
-            group_id=consumer_config.get('group_id', self.config.get('group_id', 'default-group')),
-            auto_offset_reset=consumer_config.get('auto_offset_reset', self.config.get('auto_offset_reset', 'latest')),
-            enable_auto_commit=consumer_config.get('enable_auto_commit', self.config.get('enable_auto_commit', True)),
-            value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+            bootstrap_servers=bootstrap,
+            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+            **base_kwargs,
         )
         await self.consumer.start()
 
     async def getone(self):
         try:
+            if self.consumer is None:
+                raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
             msg = await self.consumer.getone()
             return msg
         except Exception as e:
@@ -162,15 +229,34 @@ class AsyncKafkaProducerClient:
         self.producer = None
 
     async def start(self):
+        producer_cfg = self.config.get('producer', {}) if isinstance(self.config, dict) else {}
+        bootstrap = _extract_bootstrap_servers(self.config, 'producer')
+        if not bootstrap:
+            raise KeyError("bootstrap_servers 未配置：请在顶层或producer子配置中提供")
+
+        # Allowed keys for aiokafka AIOKafkaProducer
+        allowed = {
+            'acks', 'compression_type', 'linger_ms',
+            # security (AIOKafka常用)
+            'security_protocol', 'sasl_mechanism', 'sasl_plain_username', 'sasl_plain_password',
+        }
+        base_kwargs = _allowed_subset(producer_cfg, allowed)
+        for k in list(allowed):
+            if k not in base_kwargs and k in self.config:
+                base_kwargs[k] = self.config[k]
+
         self.producer = AIOKafkaProducer(
             loop=self.loop,
-            bootstrap_servers=self.config['bootstrap_servers'],
-            value_serializer=lambda m: json.dumps(m, ensure_ascii=False).encode('utf-8')
+            bootstrap_servers=bootstrap,
+            value_serializer=lambda m: json.dumps(m, ensure_ascii=False).encode('utf-8'),
+            **base_kwargs,
         )
         await self.producer.start()
 
     async def send(self, topic, value):
         try:
+            if self.producer is None:
+                raise RuntimeError("AsyncKafkaProducer 未启动，producer为None")
             await self.producer.send_and_wait(topic, value)
         except Exception as e:
             logging.error(f"AsyncKafkaProducer send异常: {e}")

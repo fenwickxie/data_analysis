@@ -146,6 +146,55 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
    ```
    
    系统会自动兼容两种格式，优先读取嵌套配置，如果不存在则回退到扁平配置。
+
+   **安全配置（SASL/SSL）示例**：
+
+   - 嵌套（推荐）：
+
+   ```python
+   KAFKA_CONFIG = {
+      'consumer': {
+         'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
+         'group_id': 'prod_group',
+         'security_protocol': 'SASL_PLAINTEXT',  # 或 SASL_SSL/SSL/PLAINTEXT
+         'sasl_mechanism': 'PLAIN',
+         'sasl_plain_username': 'user',
+         'sasl_plain_password': 'pass',
+         # 同步客户端还支持：'ssl_cafile','ssl_certfile','ssl_keyfile'
+      },
+      'producer': {
+         'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
+         'acks': 'all',
+         'compression_type': 'gzip',
+         'security_protocol': 'SASL_PLAINTEXT',
+         'sasl_mechanism': 'PLAIN',
+         'sasl_plain_username': 'user',
+         'sasl_plain_password': 'pass',
+      }
+   }
+   ```
+
+   - 扁平（兼容）：
+
+   ```python
+   KAFKA_CONFIG = {
+      'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
+      'group_id': 'prod_group',
+      'security_protocol': 'SASL_SSL',
+      'sasl_mechanism': 'PLAIN',
+      'sasl_plain_username': 'user',
+      'sasl_plain_password': 'pass',
+      # 同步客户端：
+      'ssl_cafile': '/path/ca.pem',
+      'ssl_certfile': '/path/cert.pem',
+      'ssl_keyfile': '/path/key.pem',
+   }
+   ```
+
+   透传参数白名单（当前实现）：
+   - 消费者：group_id, auto_offset_reset, enable_auto_commit, max_poll_records, session_timeout_ms, request_timeout_ms, heartbeat_interval_ms, max_poll_interval_ms, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
+   - 生产者：acks, retries, compression_type, linger_ms, batch_size, max_in_flight_requests_per_connection, buffer_memory, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
+   - 异步消费者/生产者（aiokafka）：支持 security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password 等核心安全参数
 2. **Topic配置**：
    
    - `TOPIC_DETAIL`：每个topic的详细配置，包括字段、推送频率、依赖模块和数据窗口大小
