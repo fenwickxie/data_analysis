@@ -10,7 +10,13 @@ version: 1.0
 """
 
 # 数据分发与依赖处理
-from .config import MODULE_DEPENDENCIES
+from .config import (
+    MODULE_DEPENDENCIES,
+    MODULE_OUTPUT_TOPICS,
+    MODULE_TO_TOPICS,
+    TOPIC_DETAIL,
+    TOPIC_TO_MODULES,
+)
 from .parsers import *
 
 
@@ -18,12 +24,11 @@ import threading
 import time
 import logging
 from collections import deque
-from .__init__ import handle_error, DispatcherError
+from .errors import handle_error, DispatcherError
 
 logging.basicConfig(
     level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s"
 )
-from .config import TOPIC_TO_MODULES, MODULE_TO_TOPICS, TOPIC_DETAIL
 from .topic_parsers import *
 
 TOPIC_PARSER_MAP = {
@@ -38,6 +43,10 @@ TOPIC_PARSER_MAP = {
     "SCHEDULE-DEVICE-HOST": DeviceHostParser(),
     "SCHEDULE-DEVICE-STORAGE": DeviceStorageParser(),
 }
+
+for module_name, topic_name in MODULE_OUTPUT_TOPICS.items():
+    if topic_name not in TOPIC_PARSER_MAP:
+        TOPIC_PARSER_MAP[topic_name] = ModelOutputParser(module_name)
 
 
 class DataDispatcher:
@@ -219,18 +228,38 @@ class DataDispatcher:
                         for f in TOPIC_DETAIL.get(topic, {}).get("fields", []):
                             input_data[f"{f}_window"] = [0] * win_size
                             input_data[f] = 0
-                # 依赖其他模块输出
+                # 依赖其他模块输出（通过Kafka topic获取）
                 deps = MODULE_DEPENDENCIES.get(module, [])
                 for dep in deps:
+                    output_topic = MODULE_OUTPUT_TOPICS.get(dep)
+                    if not output_topic:
+                        continue
+                    dep_window = self.get_topic_window(station_id, output_topic)
+                    if not dep_window:
+                        continue
+                    parser = TOPIC_PARSER_MAP.get(output_topic)
                     try:
-                        dep_input = self.get_module_input(station_id, dep)
-                        if dep_input:
-                            input_data.update(dep_input)
+                        parsed_values = (
+                            [parser.parse(d) for d in dep_window] if parser else list(dep_window)
+                        )
                     except Exception as e:
                         handle_error(
                             DispatcherError(e),
-                            context=f"依赖聚合 module={module}, dep={dep}, station_id={station_id}",
+                            context=f"依赖topic解析 module={module}, dep={dep}, topic={output_topic}, station_id={station_id}",
                         )
+                        parsed_values = []
+                    if not parsed_values:
+                        continue
+                    window_size = TOPIC_DETAIL.get(output_topic, {}).get(
+                        "window_size", len(parsed_values)
+                    )
+                    trimmed = parsed_values[-window_size:]
+                    input_data[f"{dep}_output_window"] = trimmed
+                    latest = trimmed[-1]
+                    if isinstance(latest, dict):
+                        input_data.update(latest)
+                    else:
+                        input_data[f"{dep}_output"] = latest
                 try:
                     return self.parsers[module].parse(input_data)
                 except Exception as e:
@@ -246,12 +275,12 @@ class DataDispatcher:
             )
             return None
 
-    def get_all_outputs(self, station_id):
+    def get_all_inputs(self, station_id):
         with self.lock:
             if station_id not in self.data_cache:
                 return {}
             return {
-                m: self.get_module_input(station_id, m) for m in self.parsers.keys()
+                m: self.get_module_input(station_id, module=m) for m in self.parsers.keys()
             }
 
     def clean_expired(self):

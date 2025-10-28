@@ -25,7 +25,7 @@ def test_kafka_upload(monkeypatch):
     monkeypatch.setattr('data_analysis.kafka_producer.KafkaProducerClient.send', fake_send)
     service = DataAnalysisService(module_name='load_prediction')
     # 模拟dispatcher输出
-    service.dispatcher.get_all_outputs = lambda sid: {'load_prediction': {'timestamp': 123}}
+    service.dispatcher.get_all_inputs = lambda sid: {'load_prediction': {'timestamp': 123}}
     # 启动一个场站线程
     sid = 'station1'
     service._station_stop_events[sid] = threading.Event()

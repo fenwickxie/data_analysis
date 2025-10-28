@@ -17,7 +17,7 @@ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 import json
 import logging
 
-from .__init__ import handle_error, KafkaConnectionError
+from .errors import handle_error, KafkaConnectionError
 
 def _extract_bootstrap_servers(config: dict, section: str):
     """Get bootstrap_servers from nested section or top-level for compatibility."""

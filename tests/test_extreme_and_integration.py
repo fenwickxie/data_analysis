@@ -83,10 +83,10 @@ def test_kafka_real_integration(monkeypatch):
 @pytest.mark.asyncio
 async def test_async_service_callback_exception():
     service = AsyncDataAnalysisService(module_name="load_prediction")
-    orig_get_all_outputs = service.dispatcher.get_all_outputs
+    orig_get_all_outputs = service.dispatcher.get_all_inputs
     def fake_get_all_outputs(station_id):
         return {'load_prediction': {'timestamp': 1}}
-    service.dispatcher.get_all_outputs = fake_get_all_outputs
+    service.dispatcher.get_all_inputs = fake_get_all_outputs
     async def bad_cb(station_id, module_input):
         raise ValueError("test async callback error")
     await service.add_station('sid_async_err', bad_cb)
@@ -97,14 +97,14 @@ async def test_async_service_callback_exception():
     await asyncio.sleep(0.01)
     status2 = service.get_station_status()
     assert not status2['sid_async_err']['running']
-    service.dispatcher.get_all_outputs = orig_get_all_outputs
+    service.dispatcher.get_all_inputs = orig_get_all_outputs
 
 def test_sync_service_callback_exception():
     service = DataAnalysisService(module_name='load_prediction')
-    orig_get_all_outputs = service.dispatcher.get_all_outputs
+    orig_get_all_outputs = service.dispatcher.get_all_inputs
     def fake_get_all_outputs(station_id):
         return {'load_prediction': {'timestamp': 1}}
-    service.dispatcher.get_all_outputs = fake_get_all_outputs
+    service.dispatcher.get_all_inputs = fake_get_all_outputs
     def bad_cb(station_id, module_input):
         raise ValueError("test sync callback error")
     sid = 'sid_sync_err'
@@ -117,12 +117,12 @@ def test_sync_service_callback_exception():
     status = service.get_station_status()
     assert sid in status
     assert status[sid]['running'] is False
-    service.dispatcher.get_all_outputs = orig_get_all_outputs
+    service.dispatcher.get_all_inputs = orig_get_all_outputs
 
 def test_dispatcher_empty_topic():
     dispatcher = DataDispatcher()
     dispatcher.update_topic_data('station1', 'UNKNOWN_TOPIC', {})
-    assert dispatcher.get_all_outputs('station1') == {}
+    assert dispatcher.get_all_inputs('station1') == {}
 
 def test_dispatcher_extreme_window():
     dispatcher = DataDispatcher()
@@ -135,10 +135,10 @@ def test_callback_exception_logging(caplog):
     def bad_callback(station_id, module_input):
         raise ValueError("故意异常")
     service = DataAnalysisService(module_name="load_prediction")
-    orig_get_all_outputs = service.dispatcher.get_all_outputs
+    orig_get_all_outputs = service.dispatcher.get_all_inputs
     def fake_get_all_outputs(station_id):
         return {'load_prediction': {'timestamp': 123}}
-    service.dispatcher.get_all_outputs = fake_get_all_outputs
+    service.dispatcher.get_all_inputs = fake_get_all_outputs
     sid = 'station_cb'
     service._station_stop_events[sid] = threading.Event()
     t = threading.Thread(target=service._station_worker, args=(sid, bad_callback, service._station_stop_events[sid]), daemon=True)
@@ -147,7 +147,7 @@ def test_callback_exception_logging(caplog):
     service._station_stop_events[sid].set()
     t.join()
     assert any("回调处理" in r for r in caplog.text)
-    service.dispatcher.get_all_outputs = orig_get_all_outputs
+    service.dispatcher.get_all_inputs = orig_get_all_outputs
 
 def test_window_all_missing():
     dispatcher = DataDispatcher()

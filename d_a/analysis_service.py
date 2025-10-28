@@ -16,39 +16,44 @@ import time
 import threading
 
 # 使用相对导入避免循环依赖
-from . import (
+from .errors import (
     DataAnalysisError,
     KafkaConnectionError,
     DispatcherError,
     handle_error,
 )
-from .kafka_client import KafkaConsumerClient, KafkaProducerClient, AsyncKafkaConsumerClient, AsyncKafkaProducerClient
-from .config import KAFKA_CONFIG, TOPIC_TO_MODULES
+from .kafka_client import (
+    KafkaConsumerClient,
+    KafkaProducerClient,
+    AsyncKafkaConsumerClient,
+    AsyncKafkaProducerClient,
+)
+from .config import KAFKA_CONFIG, TOPIC_TO_MODULES, MODULE_TO_TOPICS
 from .dispatcher import DataDispatcher
 
 
 class AsyncDataAnalysisService:
     """
     异步数据解析服务，支持多场站并发、窗口补全/插值、依赖聚合、自动上传Kafka。
-    
+
     该服务基于asyncio实现，适合高并发、云原生场景，提供比同步服务更高的吞吐量。
     每个场站使用独立的异步任务处理数据，支持异步回调函数，
     可以更好地处理IO密集型和计算密集型任务。
-    
+
     主要特性：
     - 基于asyncio的高并发处理
     - 支持异步回调函数，适合模型推理、远程调用等场景
     - 动态添加/移除场站任务
     - 完整的任务状态监控
     - 与同步服务相同的窗口处理和依赖聚合功能
-    
+
     Args:
         module_name (str, optional): 业务模块名称，用于标识当前处理模块
         topics (list, optional): 需要消费的topic列表，默认为配置文件中所有topic
         kafka_config (dict, optional): Kafka连接配置，默认为config.KAFKA_CONFIG
         data_expire_seconds (int, optional): 数据过期时间(秒)，默认为600
         output_topic_prefix (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"
-        
+
     Raises:
         KafkaConnectionError: 当Kafka连接失败时抛出
     """
@@ -62,7 +67,15 @@ class AsyncDataAnalysisService:
         output_topic_prefix="MODULE-OUTPUT-",
     ):
         self.module_name = module_name
-        self.topics = topics or list(TOPIC_TO_MODULES.keys())
+        if topics is not None:
+            self.topics = topics
+        elif module_name:
+            default_topics = MODULE_TO_TOPICS.get(module_name) or []
+            self.topics = list(dict.fromkeys(default_topics)) or list(
+                TOPIC_TO_MODULES.keys()
+            )
+        else:
+            self.topics = list(TOPIC_TO_MODULES.keys())
         self.kafka_config = kafka_config or KAFKA_CONFIG
         self.dispatcher = DataDispatcher(data_expire_seconds=data_expire_seconds)
         self.consumer = AsyncKafkaConsumerClient(self.topics, self.kafka_config)
@@ -78,9 +91,9 @@ class AsyncDataAnalysisService:
     async def _station_worker(self, station_id, callback, stop_flag):
         while not stop_flag.is_set():
             try:
-                outputs = self.dispatcher.get_all_outputs(station_id)
+                inputs = self.dispatcher.get_all_inputs(station_id)
                 module_input = (
-                    outputs.get(self.module_name) if self.module_name else outputs
+                    inputs.get(self.module_name) if self.module_name else inputs
                 )
                 result = None
                 if callback:
@@ -92,7 +105,7 @@ class AsyncDataAnalysisService:
                     except Exception as e:
                         handle_error(e, context=f"回调处理 station_id={station_id}")
                 if self.output_topic and module_input is not None:
-                    out = result if result is not None else module_input
+                    out = result if result is not None else None
                     out_data = {
                         "station_id": station_id,
                         "output": out,
@@ -181,8 +194,8 @@ class AsyncDataAnalysisService:
         if self._main_task:
             await self._main_task
 
-    def get_outputs(self, station_id):
-        return self.dispatcher.get_all_outputs(station_id)
+    def get_inputs(self, station_id):
+        return self.dispatcher.get_all_inputs(station_id)
 
     async def add_station(self, station_id, callback):
         """
@@ -222,24 +235,24 @@ class AsyncDataAnalysisService:
 class DataAnalysisService:
     """
     通用数据解析服务，可嵌入各业务模型或独立运行。
-    
+
     该服务从Kafka消费各topic数据，解析并整合为各业务模块所需格式，
     提供统一的数据分发接口，支持多场站并发处理和自动上传到Kafka。
-    
+
     主要功能：
     - 多场站多线程，自动缓存窗口数据，补零/插值
     - 自动处理模型间依赖关系
     - 自动上传本模型输出到Kafka供其他模型消费
     - 支持自定义回调处理
     - 支持配置热更新
-    
+
     Args:
         module_name (str, optional): 业务模块名称，用于标识当前处理模块
         topics (list, optional): 需要消费的topic列表，默认为配置文件中所有topic
         kafka_config (dict, optional): Kafka连接配置，默认为config.KAFKA_CONFIG
         data_expire_seconds (int, optional): 数据过期时间(秒)，默认为600
         output_topic_prefix (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"
-        
+
     Raises:
         KafkaConnectionError: 当Kafka连接失败时抛出
     """
@@ -254,10 +267,10 @@ class DataAnalysisService:
     ):
         """
         初始化数据解析服务，自动连接Kafka，初始化分发器。
-        
+
         创建服务实例时会自动初始化Kafka消费者和生产者，
         并设置数据分发器。服务启动前不会实际连接Kafka。
-        
+
         Args:
             module_name (str, optional): 业务模块名称，用于标识当前处理模块。
                 如果指定，服务将只处理该模块所需的数据，并将结果上传到对应的输出topic。
@@ -269,12 +282,20 @@ class DataAnalysisService:
                 超过此时间未更新的场站数据将被自动清理。
             output_topic_prefix (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"。
                 完整的输出topic为"前缀+模块名大写"。
-                
+
         Raises:
             KafkaConnectionError: 当Kafka连接初始化失败时抛出
         """
         self.module_name = module_name
-        self.topics = topics or list(TOPIC_TO_MODULES.keys())
+        if topics is not None:
+            self.topics = topics
+        elif module_name:
+            default_topics = MODULE_TO_TOPICS.get(module_name) or []
+            self.topics = list(dict.fromkeys(default_topics)) or list(
+                TOPIC_TO_MODULES.keys()
+            )
+        else:
+            self.topics = list(TOPIC_TO_MODULES.keys())
         self.kafka_config = kafka_config or KAFKA_CONFIG
         self.dispatcher = DataDispatcher(data_expire_seconds=data_expire_seconds)
         try:
@@ -295,7 +316,7 @@ class DataAnalysisService:
     def _station_worker(self, station_id, callback, stop_event):
         while not stop_event.is_set():
             try:
-                outputs = self.dispatcher.get_all_outputs(station_id)
+                outputs = self.dispatcher.get_all_inputs(station_id)
                 module_input = (
                     outputs.get(self.module_name) if self.module_name else outputs
                 )
@@ -384,10 +405,10 @@ class DataAnalysisService:
     def start(self, callback=None, background=True):
         """
         启动数据解析服务。
-        
+
         启动后会开始从Kafka消费数据，并根据配置处理数据。
         如果指定了回调函数，每个场站数据更新时都会调用该函数。
-        
+
         Args:
             callback (function, optional): 回调函数(station_id, module_input)，
                 每个场站数据更新时调用。回调函数接收场站ID和模块输入数据，
@@ -395,7 +416,7 @@ class DataAnalysisService:
             background (bool, optional): 是否后台线程运行。如果为True，
                 服务将在后台线程中运行；如果为False，服务将阻塞当前线程。
                 默认为True。
-                
+
         注意:
             - 如果background=True，需要调用stop()方法停止服务
             - 回调函数应尽量保持轻量，避免耗时操作
@@ -412,10 +433,10 @@ class DataAnalysisService:
     def stop(self):
         """
         停止数据解析服务。
-        
+
         停止后会关闭Kafka连接，停止所有场站线程，并清理资源。
         如果服务是在后台线程中运行的，此方法会等待线程结束。
-        
+
         注意:
             - 调用此方法后，服务将无法继续处理数据
             - 如果服务是前台运行的，此方法会阻塞直到服务完全停止
@@ -428,38 +449,38 @@ class DataAnalysisService:
     def get_outputs(self, station_id):
         """
         获取指定场站所有模块的输入结构
-        
+
         返回的数据包含所有业务模块的输入，每个模块的数据已经过窗口处理和依赖聚合。
         如果指定场站没有数据，返回空字典。
-        
+
         Args:
             station_id (str): 场站ID
-            
+
         Returns:
             dict: 包含所有模块输入数据的字典，格式为 {module_name: module_input}
                   module_input是各模块所需的结构化数据
-                  
+
         注意:
             - 此方法返回的是当前缓存的数据，可能不是最新的
             - 如果场站数据已过期，可能返回空值或不完整数据
             - 建议在回调函数中使用此方法获取其他模块的数据
         """
-        return self.dispatcher.get_all_outputs(station_id)
+        return self.dispatcher.get_all_inputs(station_id)
 
     def reload_config(self):
         """
         动态热加载config.py配置（topic、窗口、依赖等），并同步dispatcher。
-        
+
         此方法允许在不重启服务的情况下更新配置，包括topic映射、
         数据窗口大小、模块依赖关系等。更新后的配置会立即生效，
         但已缓存的数据不会自动清理，需要等待自然过期或手动清理。
-        
+
         使用场景：
         - 需要添加新的topic或模块
         - 需要调整数据窗口大小
         - 需要修改模块依赖关系
         - 需要更新Kafka连接参数
-        
+
         注意:
         - 配置文件修改后需要调用此方法才能生效
         - Kafka连接参数修改后可能需要重启服务才能生效
@@ -467,7 +488,7 @@ class DataAnalysisService:
         - 建议在低峰期执行配置更新
         """
         import importlib
-        import data_analysis.config as config_mod
+        import d_a.config as config_mod
 
         importlib.reload(config_mod)
         # 更新本地配置
@@ -482,10 +503,10 @@ class DataAnalysisService:
     def get_station_status(self):
         """
         获取所有场站线程健康状态。
-        
+
         此方法用于监控各个场站处理线程的运行状态，可用于服务健康检查和故障排查。
         每个场站对应一个独立的处理线程，负责该场站的数据处理和回调执行。
-        
+
         Returns:
             dict: 场站状态字典，格式为 {station_id: status_info}，其中
                 station_id (str): 场站ID
@@ -493,12 +514,12 @@ class DataAnalysisService:
                     - 'running' (bool): 线程是否正在运行
                     - 'future' (concurrent.futures.Future): 线程的Future对象
                     可用于获取线程执行结果和异常信息
-                    
+
         示例:
             >>> status = service.get_station_status()
             >>> for station_id, info in status.items():
             ...     print(f"场站 {station_id}: 运行中={info['running']}")
-            
+
         注意:
             - 如果线程刚刚启动，'running'可能为True但实际处理还未开始
             - 如果线程已结束但未清理，'running'可能为False但future对象仍存在
@@ -512,23 +533,23 @@ class DataAnalysisService:
     def get_service_status(self):
         """
         获取服务主线程及Kafka连接健康状态。
-        
+
         此方法用于监控整个服务的运行状态，包括主线程、Kafka连接和场站数量，
         可用于服务健康检查、监控和故障排查。返回的状态信息可用于构建
         服务监控面板或自动健康检查脚本。
-        
+
         Returns:
             dict: 服务状态字典，包含以下字段
                 - main_thread_alive (bool): 主线程是否正在运行
                 - consumer_alive (bool): Kafka消费者是否已初始化
                 - producer_alive (bool): Kafka生产者是否已初始化
                 - station_count (int): 当前活跃场站数量
-                
+
         示例:
             >>> status = service.get_service_status()
             >>> print(f"主线程状态: {status['main_thread_alive']}")
             >>> print(f"场站数量: {status['station_count']}")
-            
+
         注意:
             - consumer_alive和producer_alive仅表示对象是否存在，
               不代表实际连接状态，连接状态需查看日志

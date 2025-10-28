@@ -18,7 +18,7 @@ from data_analysis.analysis_service import DataAnalysisService, AsyncDataAnalysi
 def test_health_monitoring():
     service = DataAnalysisService(module_name='load_prediction')
     # 模拟dispatcher输出
-    service.dispatcher.get_all_outputs = lambda sid: {'load_prediction': {'timestamp': 123}}
+    service.dispatcher.get_all_inputs = lambda sid: {'load_prediction': {'timestamp': 123}}
     sid = 'station_health'
     service._station_stop_events[sid] = threading.Event()
     t = threading.Thread(target=service._station_worker, args=(sid, lambda s, m: {'result': 1}, service._station_stop_events[sid]), daemon=True)
@@ -46,7 +46,7 @@ def test_reload_config(monkeypatch):
 async def test_async_add_remove_station():
     service = AsyncDataAnalysisService(module_name='load_prediction')
     # mock dispatcher
-    service.dispatcher.get_all_outputs = lambda sid: {'load_prediction': {'timestamp': 1}}
+    service.dispatcher.get_all_inputs = lambda sid: {'load_prediction': {'timestamp': 1}}
     async def cb(station_id, module_input):
         return {'result': 2}
     await service.add_station('sid_async', cb)

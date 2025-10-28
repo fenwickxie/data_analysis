@@ -19,6 +19,7 @@ from .car_price import CarPriceParser
 from .device_error import DeviceErrorParser
 from .device_host import DeviceHostParser
 from .device_storage import DeviceStorageParser
+from .model_output import ModelOutputParser
 
 __all__ = [
     'StationParamParser',
@@ -31,4 +32,5 @@ __all__ = [
     'DeviceErrorParser',
     'DeviceHostParser',
     'DeviceStorageParser',
+    'ModelOutputParser',
 ]

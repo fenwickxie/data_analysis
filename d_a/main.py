@@ -39,8 +39,20 @@ version: 1.0
 
 
 # ===================== 异步示例 =====================
+from __future__ import annotations
+
 import asyncio
-from data_analysis.analysis_service import AsyncDataAnalysisService
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+    # Allow running via `python d_a/main.py` by adding the project root.
+    project_root = Path(__file__).resolve().parent.parent
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
+    from d_a.analysis_service import AsyncDataAnalysisService
+else:
+    from .analysis_service import AsyncDataAnalysisService
 
 
 async def my_model_predict(module_input):
