@@ -14,9 +14,9 @@ import asyncio
 import threading
 import time
 import math
-from data_analysis.analysis_service import DataAnalysisService, AsyncDataAnalysisService
-from data_analysis.dispatcher import DataDispatcher
-from data_analysis.kafka_client import KafkaProducerClient, KafkaConsumerClient
+from d_a.analysis_service import DataAnalysisService, AsyncDataAnalysisService
+from d_a.dispatcher import DataDispatcher
+from d_a.kafka_client import KafkaProducerClient, KafkaConsumerClient
 
 # 异常分支测试：dispatcher极端数据
 @pytest.mark.parametrize("padding, seq, target, expect_type", [

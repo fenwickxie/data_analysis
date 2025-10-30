@@ -11,7 +11,7 @@ version: 1.0
 
 import pytest
 import asyncio
-from data_analysis.analysis_service import AsyncDataAnalysisService
+from d_a.analysis_service import AsyncDataAnalysisService
 
 @pytest.mark.asyncio
 async def test_async_service_basic(monkeypatch):

@@ -9,7 +9,7 @@ filename: test_kafka_upload.py
 version: 1.0
 """
 
-from data_analysis.analysis_service import DataAnalysisService
+from d_a.analysis_service import DataAnalysisService
 import threading
 import time
 

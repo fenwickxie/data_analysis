@@ -10,7 +10,7 @@ version: 1.0
 """
 
 import pytest
-from data_analysis.dispatcher import DataDispatcher
+from d_a.dispatcher import DataDispatcher
 
 def test_zero_padding():
     dispatcher = DataDispatcher()

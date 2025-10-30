@@ -10,8 +10,8 @@ version: 1.0
 """
 
 import pytest
-from data_analysis.dispatcher import DataDispatcher
-from data_analysis.config import TOPIC_DETAIL
+from d_a.dispatcher import DataDispatcher
+from d_a.config import TOPIC_DETAIL
 
 def test_window_padding():
     dispatcher = DataDispatcher(data_expire_seconds=60)

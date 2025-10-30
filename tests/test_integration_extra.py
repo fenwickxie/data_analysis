@@ -13,7 +13,7 @@ import pytest
 import threading
 import time
 import asyncio
-from data_analysis.analysis_service import DataAnalysisService, AsyncDataAnalysisService
+from d_a.analysis_service import DataAnalysisService, AsyncDataAnalysisService
 
 def test_health_monitoring():
     service = DataAnalysisService(module_name='load_prediction')

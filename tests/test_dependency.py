@@ -9,8 +9,8 @@ filename: test_dependency.py
 version: 1.0
 """
 
-from data_analysis.dispatcher import DataDispatcher
-from data_analysis.config import TOPIC_DETAIL
+from d_a.dispatcher import DataDispatcher
+from d_a.config import TOPIC_DETAIL
 
 def test_dependency_aggregation():
     dispatcher = DataDispatcher(data_expire_seconds=60)
