@@ -42,8 +42,12 @@ version: 1.0
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
+import time
 from pathlib import Path
+
+MODULE_NAME = "load_prediction"
 
 if __package__ in (None, ""):
     # Allow running via `python d_a/main.py` by adding the project root.
@@ -51,8 +55,12 @@ if __package__ in (None, ""):
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
     from d_a.analysis_service import AsyncDataAnalysisService
+    from d_a.kafka_client import AsyncKafkaProducerClient
+    from d_a.config import KAFKA_CONFIG, MODULE_OUTPUT_TOPICS
 else:
     from .analysis_service import AsyncDataAnalysisService
+    from .kafka_client import AsyncKafkaProducerClient
+    from .config import KAFKA_CONFIG, MODULE_OUTPUT_TOPICS
 
 
 async def my_model_predict(module_input):
@@ -64,18 +72,41 @@ async def my_model_predict(module_input):
 async def my_callback(station_id, module_input):
     # module_input为本模型所需结构化输入（含窗口补全/插值、依赖聚合）
     result = await my_model_predict(module_input)
-    return result  # 返回值会自动上传到Kafka
+    return result  # 返回值将交由result_handler处理
 
 
 async def main():
-    service = AsyncDataAnalysisService(module_name="load_prediction")
-    await service.start(callback=my_callback)
+    output_topic = MODULE_OUTPUT_TOPICS.get(MODULE_NAME)
+    if not output_topic:
+        raise RuntimeError(f"未配置模块 {MODULE_NAME} 的输出topic")
+
+    producer = AsyncKafkaProducerClient(KAFKA_CONFIG)
+    await producer.start()
+
+    service = AsyncDataAnalysisService(module_name=MODULE_NAME)
+
+    async def result_handler(station_id, module_input, result):
+        if result is None:
+            return
+        payload = {
+            "station_id": station_id,
+            "module": MODULE_NAME,
+            "result": result,
+            "timestamp": time.time(),
+        }
+        try:
+            await producer.send(output_topic, payload)
+        except Exception as exc:  # noqa: BLE001
+            logging.error("Kafka上传失败", exc_info=exc)
+
+    await service.start(callback=my_callback, result_handler=result_handler)
     try:
         for _ in range(10):  # 模拟主循环10次
             print(service.get_station_status())
             await asyncio.sleep(1)
     finally:
         await service.stop()
+        await producer.stop()
 
 
 if __name__ == "__main__":
