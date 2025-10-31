@@ -1,3 +1,2 @@
-kafka-python>=2.2.15
+confluent-kafka>=2.5.0
 numpy>=1.21.2
-aiokafka>=0.12.0
