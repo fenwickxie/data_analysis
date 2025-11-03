@@ -159,41 +159,7 @@ class DataDispatcher:
         return [item[0] for item in self.data_cache[station_id][topic]]
 
     def get_module_input(self, station_id, module):
-        # 整合该场站所有topic窗口数据，组装为模块输入，窗口不足自动补零或插值
-        def pad_or_interp(seq, target_len, pad_value=0):
-            """Pad or interpolate a sequence to target length according to current strategy."""
-            n = len(seq)
-            if n == 0:
-                if self.padding_strategy == "zero":
-                    return [0] * target_len
-                elif self.padding_strategy == "linear":
-                    return [0] * target_len
-                elif self.padding_strategy == "forward":
-                    return [pad_value] * target_len
-                elif self.padding_strategy == "missing":
-                    return [None] * target_len
-            if n >= target_len:
-                return seq[-target_len:]
-            if self.padding_strategy == "zero":
-                if isinstance(seq[0], (int, float)):
-                    return [0] * (target_len - n) + seq
-                else:
-                    return [0] * (target_len - n) + seq
-            elif self.padding_strategy == "linear":
-                if isinstance(seq[0], (int, float)):
-                    import numpy as np
-                    x = np.arange(n)
-                    xp = np.linspace(0, n-1, target_len)
-                    y = np.array(seq)
-                    return list(np.interp(xp, x, y))
-                else:
-                    return [seq[0]] * (target_len - n) + seq
-            elif self.padding_strategy == "forward":
-                return [seq[0]] * (target_len - n) + seq
-            elif self.padding_strategy == "missing":
-                return [None] * (target_len - n) + seq
-            return seq
-        
+        # 整合该场站所有topic窗口数据，组装为模块输入。输入数据已经是窗口结构，直接展开。
         try:
             with self.lock:
                 if station_id not in self.data_cache:
@@ -204,30 +170,27 @@ class DataDispatcher:
                     win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
                     if window:
                         try:
-                            parsed_list = [
-                                TOPIC_PARSER_MAP[topic].parse(d)
-                                for d in window
-                            ]
+                            parsed = TOPIC_PARSER_MAP[topic].parse(window[-1])
                         except Exception as e:
                             handle_error(
                                 DispatcherError(e),
                                 context=f"topic解析 topic={topic}, station_id={station_id}",
                             )
-                            parsed_list = []
-                        # 字段聚合
-                        field_buf = {}
-                        for parsed in parsed_list:
-                            for k, v in parsed.items():
-                                field_buf.setdefault(k, []).append(v)
-                        for k, seq in field_buf.items():
-                            padded = pad_or_interp(seq, win_size)
-                            input_data[f"{k}_window"] = padded
-                            input_data[k] = padded[-1] if padded else None
+                            parsed = None
+                        if isinstance(parsed, dict):
+                            for key, value in parsed.items():
+                                if isinstance(value, list):
+                                    latest_window = value[-win_size:] if win_size else value
+                                    input_data[f"{key}_window"] = latest_window
+                                    input_data[key] = latest_window[-1] if latest_window else None
+                                else:
+                                    input_data[key] = value
+                        elif parsed is not None:
+                            input_data[topic] = parsed
                     else:
-                        # 全部补零
                         for f in TOPIC_DETAIL.get(topic, {}).get("fields", []):
-                            input_data[f"{f}_window"] = [0] * win_size
-                            input_data[f] = 0
+                            input_data[f"{f}_window"] = []
+                            input_data[f] = None
                 # 依赖其他模块输出（通过Kafka topic获取）
                 deps = MODULE_DEPENDENCIES.get(module, [])
                 for dep in deps:
@@ -250,14 +213,11 @@ class DataDispatcher:
                         parsed_values = []
                     if not parsed_values:
                         continue
-                    window_size = TOPIC_DETAIL.get(output_topic, {}).get(
-                        "window_size", len(parsed_values)
-                    )
-                    trimmed = parsed_values[-window_size:]
-                    input_data[f"{dep}_output_window"] = trimmed
-                    latest = trimmed[-1]
+                    latest = parsed_values[-1]
+                    input_data[f"{dep}_output_window"] = latest
                     if isinstance(latest, dict):
-                        input_data.update(latest)
+                        for key, value in latest.items():
+                            input_data[f"{dep}_{key}"] = value
                     else:
                         input_data[f"{dep}_output"] = latest
                 try:
@@ -289,9 +249,10 @@ class DataDispatcher:
             expired_stations = []
             for station_id, topic_map in self.data_cache.items():
                 for t, dq in topic_map.items():
-                    # 移除过期数据
-                    while dq and now - dq[0][1] > self.data_expire_seconds:
-                        dq.popleft()
+                    # 移除过期数据，保留最新窗口
+                    while dq and now - dq[-1][1] > self.data_expire_seconds:
+                        dq.clear()
+                        break
                 # 如果所有topic都无数据则移除场站
                 if all(len(dq) == 0 for dq in topic_map.values()):
                     expired_stations.append(station_id)

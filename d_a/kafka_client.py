@@ -70,7 +70,6 @@ class KafkaConsumerClient:
                 self.consumer = KafkaConsumer(
                     *self.topics,
                     bootstrap_servers=bootstrap,
-                    value_deserializer=lambda m: json.loads(m.decode('utf-8')),
                     **base_kwargs,
                 )
                 return
@@ -204,7 +203,6 @@ class AsyncKafkaConsumerClient:
             *self.topics,
             loop=self.loop,
             bootstrap_servers=bootstrap,
-            value_deserializer=lambda m: json.loads(m.decode('utf-8')),
             **base_kwargs,
         )
         await self.consumer.start()
