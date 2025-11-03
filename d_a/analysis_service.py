@@ -105,47 +105,51 @@ class AsyncDataAnalysisService:
         try:
             while not self._stop_event.is_set():
                 try:
-                    msg = await self.consumer.getone()
+                    batch = await self.consumer.getmany(timeout_ms=1000)
                 except Exception as exc:  # noqa: BLE001
                     handle_error(
                         exc, context="Kafka消费", recover=lambda: asyncio.sleep(2)
                     )
                     await asyncio.sleep(2)
                     continue
-                topic = msg.topic
-                value = msg.value
-                if not isinstance(value, dict):
-                    handle_error(
-                        DataAnalysisError("Kafka消息value为None或非dict"),
-                        context=f"topic={topic}, value={value}",
-                    )
+                if not batch:
+                    await asyncio.sleep(0.2)
                     continue
-                station_id = (
-                    value.get("station_id")
-                    or value.get("host_id")
-                    or value.get("meter_id")
-                )
-                if not station_id:
-                    continue
-                try:
-                    self.dispatcher.update_topic_data(station_id, topic, value)
-                except Exception as exc:  # noqa: BLE001
-                    handle_error(
-                        DispatcherError(exc),
-                        context=f"update_topic_data station_id={station_id}, topic={topic}",
-                    )
-                if station_id not in self._station_tasks:
-                    stop_flag = asyncio.Event()
-                    self._station_stop_flags[station_id] = stop_flag
-                    task = asyncio.create_task(
-                        self._station_worker(
-                            station_id,
-                            self._callback,
-                            self._result_handler,
-                            stop_flag,
+                for msg in batch:
+                    topic = msg.topic
+                    value = msg.value
+                    if not isinstance(value, dict):
+                        handle_error(
+                            DataAnalysisError("Kafka消息value为None或非dict"),
+                            context=f"topic={topic}, value={value}",
                         )
+                        continue
+                    station_id = (
+                        value.get("station_id")
+                        or value.get("host_id")
+                        or value.get("meter_id")
                     )
-                    self._station_tasks[station_id] = task
+                    if not station_id:
+                        continue
+                    try:
+                        self.dispatcher.update_topic_data(station_id, topic, value)
+                    except Exception as exc:  # noqa: BLE001
+                        handle_error(
+                            DispatcherError(exc),
+                            context=f"update_topic_data station_id={station_id}, topic={topic}",
+                        )
+                    if station_id not in self._station_tasks:
+                        stop_flag = asyncio.Event()
+                        self._station_stop_flags[station_id] = stop_flag
+                        task = asyncio.create_task(
+                            self._station_worker(
+                                station_id,
+                                self._callback,
+                                self._result_handler,
+                                stop_flag,
+                            )
+                        )
+                        self._station_tasks[station_id] = task
                 try:
                     self.dispatcher.clean_expired()
                 except Exception as exc:  # noqa: BLE001

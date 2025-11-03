@@ -16,6 +16,7 @@ import asyncio
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 import json
 import logging
+from collections import deque
 
 from .errors import handle_error, KafkaConnectionError
 
@@ -178,6 +179,7 @@ class AsyncKafkaConsumerClient:
         self.config = config
         self.loop = loop or asyncio.get_event_loop()
         self.consumer = None
+        self._pending_messages = deque()
 
     async def start(self):
         consumer_cfg = self.config.get('consumer', {}) if isinstance(self.config, dict) else {}
@@ -207,16 +209,31 @@ class AsyncKafkaConsumerClient:
         )
         await self.consumer.start()
 
-    async def getone(self):
+    async def getmany(self, timeout_ms=1000, max_records=None):
+        if self.consumer is None:
+            raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
+        records = await self.consumer.getmany(
+            timeout_ms=timeout_ms, max_records=max_records
+        )
+        batch = []
+        for msgs in records.values():
+            batch.extend(msgs)
+        return batch
+
+    async def getone(self, timeout_ms=1000):
         try:
-            if self.consumer is None:
-                raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
-            msg = await self.consumer.getone()
-            return msg
+            if self._pending_messages:
+                return self._pending_messages.popleft()
+            batch = await self.getmany(timeout_ms=timeout_ms)
+            for msg in batch:
+                self._pending_messages.append(msg)
+            if self._pending_messages:
+                return self._pending_messages.popleft()
+            return None
         except Exception as e:
             logging.error(f"AsyncKafkaConsumer getone异常: {e}")
             raise
-
+            
     async def stop(self):
         if self.consumer:
             await self.consumer.stop()

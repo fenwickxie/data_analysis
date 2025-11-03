@@ -101,7 +101,7 @@ async def main():
 
     await service.start(callback=my_callback, result_handler=result_handler)
     try:
-        for _ in range(10):  # 模拟主循环10次
+        while True:  # 模拟主循环
             print(service.get_station_status())
             await asyncio.sleep(1)
     finally:
