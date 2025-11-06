@@ -37,61 +37,67 @@ KAFKA_CONFIG = {
 # topic详细配置
 TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {
-        'fields': ['station_id', 'station_temp', 'lat', 'lng', 'gun_count', 'grid_capacity', 'storage_count', 'storage_capacity', 'host_id'],
+        'fields': ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId','powerNum','normaClap', 'totalPower', 'hostCode'],
         'frequency': '新建站或配置更改时',
         'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
         'window_size': 1
     },
     'SCHEDULE-STATION-REALTIME-DATA': {
-        'fields': ['station_id', 'gun_id', 'history_curve_gun_avg', 'history_curve_gun_max', 'history_curve_station_avg', 'history_curve_station_max'],
-        'frequency': '1分钟1次，推送7天',
+        'fields': ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg'],
+        'frequency': '1小时1次，推送7天',
         'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
-        'window_size': 7*24*60
+        'window_size': 7*24
     },
     'SCHEDULE-ENVIRONMENT-CALENDAR': {
-        'fields': ['workday_code', 'holiday_code'],
+        'fields': ['dayOfWeek', 'holiday'],
         'frequency': '1年1次',
         'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
         'window_size': 1
     },
     'SCHEDULE-DEVICE-METER': {
-        'fields': ['meter_id', 'current_power', 'rated_power_limit'],
+        'fields': ['meterId', 'meterPower', 'rmeterLimitPower'],
         'frequency': '5分钟1次',
         'modules': ['operation_optimization', 'electricity_price'],
         'window_size': 7*24*12
     },
     'SCHEDULE-DEVICE-GUN': {
-        'fields': ['host_id', 'gun_id', 'gun_status'],
+        'fields': ['hostCode', 'gunNo', 'status'],
         'frequency': '15秒1次',
         'modules': ['operation_optimization'],
         'window_size': 7*24*60*4
     },
     'SCHEDULE-CAR-ORDER': {
-        'fields': ['station_id', 'order_id', 'charger_id', 'gun_id', 'charger_rated_current', 'start_time', 'end_time', 'start_SOC', 'current_SOC', 'demand_voltage', 'demand_current', 'mileage', 'car_model', 'battery_capacity'],
+        'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
         'frequency': '1秒1次',
         'modules': ['load_prediction', 'operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
         'window_size': 7*24*60*60
     },
     'SCHEDULE-CAR-PRICE': {
-        'fields': ['station_id', 'period_no', 'start_time', 'end_time', 'period_type', 'grid_price', 'service_fee'],
+        'fields': ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee'],
         'frequency': '1月1次',
         'modules': ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management'],
-        'window_size': 1
+        'window_size': 30
     },
     'SCHEDULE-DEVICE-ERROR': {
-        'fields': ['station_id', 'host_error', 'ac_error', 'dc_error', 'terminal_error', 'storage_error'],
+        'fields': ['stationId', 'hostError', 'acError', 'dcError', 'terminalError', 'storageError'],
         'frequency': '触发推送',
         'modules': ['operation_optimization', 'SOH_model'],
         'window_size': 10
     },
-    'SCHEDULE-DEVICE-HOST': {
-        'fields': ['host_id', 'acdc_status', 'dcdc_input_power', 'acdc_input_power'],
+    'SCHEDULE-DEVICE-HOST-DCDC': {
+        'fields': ['hostCode', 'dcWorkStatus', 'dcPower'],
         'frequency': '充电时1秒1次，非充电15秒1次',
-        'modules': ['evaluation_model', 'thermal_management'],
-        'window_size': 7*24*60*60
+        'modules': ['evaluation_model', 'thermal_management', 'operation_optimization'],
+        'window_size': 1
+    },
+    'SCHEDULE-DEVICE-HOST-ACDC': {
+        'fields': ['hostCode', 'acPower'],
+        'frequency': '充电时1秒1次，非充电15秒1次',
+        'modules': ['evaluation_model', 'thermal_management', 'operation_optimization'],
+        'window_size': 1
     },
     'SCHEDULE-DEVICE-STORAGE': {
-        'fields': ['host_id', 'storage_id', 'storage_power', 'storage_current', 'storage_temp_max', 'storage_temp_min', 'storage_SOC', 'storage_SOH'],
+        'fields': ['hostId', 'storageId', 'storagePower', 'storageCurrent', 'storageTempMax', 'storageTempMin', 'storageSOC', 'storageSOH'],
         'frequency': '15秒1次',
         'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization'],
         'window_size': 7*24*60*4
@@ -121,8 +127,8 @@ MODULE_OUTPUT_TOPICS = {
     'customer_mining': f"{MODULE_OUTPUT_TOPIC_PREFIX}CUSTOMER_MINING",
 }
 
-# 默认缓存最近12条模型输出，供依赖窗口使用
-MODULE_OUTPUT_WINDOW_SIZE = 12
+# 默认缓存最近1条模型输出，供依赖窗口使用
+MODULE_OUTPUT_WINDOW_SIZE = 1
 
 for module_name, output_topic in MODULE_OUTPUT_TOPICS.items():
     consumers = [
