@@ -207,7 +207,7 @@ class AsyncKafkaConsumerClient:
         )
         await self.consumer.start()
 
-    async def getmany(self, timeout_ms=1000, max_records=None):
+    async def getmany(self, timeout_ms=1000, max_records=1):
         if self.consumer is None:
             raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
         records = await self.consumer.getmany(

@@ -11,6 +11,7 @@ version: 1.0
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import json
 import logging
 import time
 import threading
@@ -117,7 +118,9 @@ class AsyncDataAnalysisService:
                     continue
                 for msg in batch:
                     topic = msg.topic
-                    value = msg.value
+                    value_str = msg.value.decode("utf-8") # New line to decode bytes to string
+                    value=json.loads(value_str) # New line to parse JSON string to dict
+                    
                     if not isinstance(value, dict):
                         handle_error(
                             DataAnalysisError("Kafka消息value为None或非dict"),
