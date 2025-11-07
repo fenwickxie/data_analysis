@@ -1,6 +1,19 @@
 # API 文档
 
+> **文档版本**：v1.1  
+> **更新日期**：2025-11-07  
+> **对应代码版本**：data_analysis v1.1 (branch: feature-one)
+
 本文档详细说明data_analysis模块的公共API、回调函数规范和配置参数。
+
+**修订说明**：
+- v1.1 (2025-11-07): 更新以匹配实际代码实现
+  - 添加 `result_handler` 参数到服务构造函数
+  - 修正方法名：`get_all_outputs` → `get_all_inputs`
+  - 移除未实现的 `set_padding_strategy` 方法
+  - 更新配置参数说明以匹配 config.py
+  - 修正字段命名规范（camelCase）
+  - 完善Kafka客户端参数白名单说明
 
 ## 目录
 
@@ -22,7 +35,8 @@ DataAnalysisService(
     topics=None,
     kafka_config=None,
     data_expire_seconds=600,
-    output_topic_prefix="MODULE-OUTPUT-"
+    output_topic_prefix="MODULE-OUTPUT-",
+    result_handler=None
 )
 ```
 
@@ -32,6 +46,7 @@ DataAnalysisService(
 - `kafka_config` (dict, optional): Kafka连接配置，默认为config.KAFKA_CONFIG。
 - `data_expire_seconds` (int, optional): 数据过期时间(秒)，默认为600。
 - `output_topic_prefix` (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"。
+- `result_handler` (callable, optional): 结果处理回调函数 `(station_id, result) -> None`，在结果上传Kafka后调用。默认为None。
 
 **异常**:
 - `KafkaConnectionError`: 当Kafka连接失败时抛出。
@@ -97,7 +112,8 @@ AsyncDataAnalysisService(
     topics=None,
     kafka_config=None,
     data_expire_seconds=600,
-    output_topic_prefix="MODULE-OUTPUT-"
+    output_topic_prefix="MODULE-OUTPUT-",
+    result_handler=None
 )
 ```
 
@@ -107,6 +123,7 @@ AsyncDataAnalysisService(
 - `kafka_config` (dict, optional): Kafka连接配置，默认为config.KAFKA_CONFIG。
 - `data_expire_seconds` (int, optional): 数据过期时间(秒)，默认为600。
 - `output_topic_prefix` (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"。
+- `result_handler` (callable, optional): 结果处理回调函数 `async (station_id, result) -> None`，在结果上传Kafka后调用。可以是同步或异步函数。默认为None。
 
 **异常**:
 - `KafkaConnectionError`: 当Kafka连接失败时抛出。
@@ -128,14 +145,20 @@ AsyncDataAnalysisService(
 
 **返回值**: None
 
-#### get_outputs(station_id)
+#### get_all_inputs(station_id)
 
 获取指定场站所有模块的输入结构。
 
 **参数**:
 - `station_id` (str): 场站ID。
 
-**返回值**: dict，包含所有模块的输入数据。
+**返回值**: dict，包含所有模块的输入数据，格式为 `{module_name: module_input}`。
+
+**示例**:
+```python
+inputs = await service.get_all_inputs("station001")
+# 返回: {"load_prediction": {...}, "operation_optimization": {...}, ...}
+```
 
 #### add_station(station_id, callback)
 
@@ -208,29 +231,26 @@ DataDispatcher(data_expire_seconds=600)
 
 **返回值**: dict，模块输入数据。
 
-#### get_all_outputs(station_id)
+#### get_all_inputs(station_id)
 
-获取指定场站所有模块的输入结构。
+获取指定场站所有模块的输入结构（内部调用，通常不直接使用）。
 
 **参数**:
 - `station_id` (str): 场站ID。
 
-**返回值**: dict，包含所有模块的输入数据。
+**返回值**: dict，包含所有模块的输入数据，格式为 `{module_name: module_input}`。
+
+**示例**:
+```python
+inputs = dispatcher.get_all_inputs("station001")
+# 返回: {"load_prediction": {...}, "operation_optimization": {...}, ...}
+```
 
 #### clean_expired()
 
-清理过期数据。
+清理过期数据（自动定期调用，通常不需要手动调用）。
 
 **参数**: 无
-
-**返回值**: None
-
-#### set_padding_strategy(strategy)
-
-设置窗口补全策略。
-
-**参数**:
-- `strategy` (str): 补全策略，'zero'（补零）、'linear'（线性插值）、'forward'（前向填充）、'missing'（缺失标记None）。
 
 **返回值**: None
 
@@ -435,20 +455,28 @@ KAFKA_CONFIG = {
 ```python
 TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {
-        'fields': ['station_id', 'station_temp', 'lat', 'lng', ...],  # 字段列表
-        'frequency': '新建站或配置更改时',                             # 推送频率
-        'modules': ['load_prediction', 'operation_optimization', ...], # 需求模块
-        'window_size': 1                                             # 窗口大小
+        'fields': ['stationId', 'stationTemp', 'lat', 'lng', ...],     # 字段列表（使用camelCase）
+        'frequency': '新建站或配置更改时',                              # 推送频率
+        'modules': ['load_prediction', 'operation_optimization', ...],  # 需求模块
+        'window_size': 1                                                # 窗口大小
+    },
+    'REAL-STATION-DATA': {
+        'fields': ['stationId', 'timestamp', 'totalPower', ...],        # 高频数据字段
+        'frequency': '15秒',                                            # 推送频率
+        'modules': ['load_prediction', 'evaluation_model', ...],        # 需求模块
+        'window_size': 7 * 24 * 60 * 4                                  # 7天数据（15秒一次）
     },
     # 其他topic配置...
 }
 ```
 
 **参数说明**:
-- `fields`: 该topic包含的字段列表
+- `fields`: 该topic包含的字段列表（注意：实际数据使用 camelCase 命名，如 `stationId` 而非 `station_id`）
 - `frequency`: 数据推送频率描述
 - `modules`: 需要消费此数据的业务模块列表
-- `window_size`: 数据窗口大小，单位为数据点数量
+- `window_size`: 数据窗口大小，单位为数据点数量。计算示例：
+  - 高频数据(15秒)的7天窗口：`7 * 24 * 60 * 4 = 40320` 个数据点
+  - 低频配置数据：`1` 个数据点即可
 
 ### 模块依赖配置 (MODULE_DEPENDENCIES)
 
@@ -477,11 +505,10 @@ MODULE_DEPENDENCIES = {
    - 默认值: "MODULE-OUTPUT-"
    - 说明: 模块输出结果的topic前缀，完整topic为"前缀+模块名大写"
 
-3. **窗口补全策略 (padding_strategy)**:
-   - 类型: str
-   - 可选值: 'zero', 'linear', 'forward', 'missing'
-   - 默认值: 'zero'
-   - 说明: 当数据窗口不足时的补全策略
+3. **窗口补全策略**:
+   - **注意**：当前版本（v1.1）未实现窗口补全策略功能
+   - 窗口不足时自动填充 None
+   - 未来版本可能支持：'zero'（补零）、'linear'（线性插值）、'forward'（前向填充）等策略
 
 ### 性能相关配置
 

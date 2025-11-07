@@ -1,6 +1,19 @@
 # 部署指南
 
+> **文档版本**：v1.1  
+> **更新日期**：2025-11-07  
+> **对应代码版本**：data_analysis v1.1 (branch: feature-one)
+
 本文档提供data_analysis模块的部署指南，包括环境要求、部署步骤、监控和日志配置，以及高可用配置方案。
+
+**修订说明**：
+- v1.1 (2025-11-07): 更新以匹配实际部署需求
+  - 更正配置中的字段命名（使用camelCase）
+  - 更新Kafka配置示例与实际代码一致
+  - 补充实际的依赖包列表
+  - 更新监控和日志配置为实际实现
+  - 完善容器化和Kubernetes部署示例
+  - 添加Python 3.9+支持说明
 
 ## 目录
 
@@ -13,9 +26,24 @@
 
 ### 软件要求
 
-- **Python**: 3.10或更高版本
-- **Kafka**: 2.2或更高版本集群
-- **操作系统**: Linux/Unix（推荐），Windows也可支持
+- **Python**: 3.9 或更高版本（推荐 3.10 或 3.11）
+- **Kafka**: 2.2 或更高版本集群（推荐 2.8+）
+- **操作系统**: Linux/Unix（推荐），Windows 也可支持
+
+### 依赖包要求
+
+核心依赖包：
+```txt
+kafka-python>=2.0.2      # 同步Kafka客户端
+aiokafka>=0.7.2          # 异步Kafka客户端
+```
+
+可选依赖（用于开发和测试）：
+```txt
+pytest>=7.0.0            # 单元测试
+pytest-asyncio>=0.18.0   # 异步测试支持
+pytest-cov>=3.0.0        # 代码覆盖率
+```
 
 ### 硬件要求
 
@@ -48,7 +76,12 @@ source venv/bin/activate  # Linux/Mac
 
 # 安装依赖
 pip install -r requirements.txt
-pip install gunicorn  # 用于进程管理
+
+# 或手动安装核心依赖
+pip install kafka-python>=2.0.2 aiokafka>=0.7.2
+
+# 开发环境额外安装
+pip install pytest pytest-asyncio pytest-cov
 ```
 
 ### 2. 配置文件准备
@@ -134,7 +167,94 @@ data_expire_seconds = 600  # 10分钟，根据数据特点调整
 
 ### 3. 服务启动脚本
 
-创建`/opt/data_analysis/start.sh`（Linux）或`start.bat`（Windows）：
+#### 同步服务启动示例
+
+创建 `sync_main.py`：
+
+```python
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+同步服务启动脚本
+"""
+from d_a import DataAnalysisService
+from d_a.config import KAFKA_CONFIG
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s %(name)s %(message)s'
+)
+
+def my_callback(station_id, module_input):
+    """处理数据的回调函数"""
+    logging.info(f"处理场站 {station_id} 的数据")
+    # 这里添加你的业务逻辑
+    return module_input  # 返回结果将自动上传到Kafka
+
+if __name__ == '__main__':
+    service = DataAnalysisService(
+        module_name='load_prediction',  # 指定模块名称
+        kafka_config=KAFKA_CONFIG,
+        data_expire_seconds=600
+    )
+    
+    try:
+        service.start(callback=my_callback, background=False)
+    except KeyboardInterrupt:
+        logging.info("收到停止信号，正在关闭服务...")
+        service.stop()
+```
+
+#### 异步服务启动示例
+
+创建 `async_main.py`：
+
+```python
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+异步服务启动脚本
+"""
+import asyncio
+from d_a import AsyncDataAnalysisService
+from d_a.config import KAFKA_CONFIG
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(asctime)s] %(levelname)s %(name)s %(message)s'
+)
+
+async def my_callback(station_id, module_input):
+    """异步处理数据的回调函数"""
+    logging.info(f"处理场站 {station_id} 的数据")
+    # 这里添加你的异步业务逻辑
+    await asyncio.sleep(0.01)  # 模拟异步操作
+    return module_input  # 返回结果将自动上传到Kafka
+
+async def main():
+    service = AsyncDataAnalysisService(
+        module_name='load_prediction',  # 指定模块名称
+        kafka_config=KAFKA_CONFIG,
+        data_expire_seconds=600
+    )
+    
+    try:
+        await service.start(callback=my_callback)
+        # 保持运行
+        await asyncio.Event().wait()
+    except KeyboardInterrupt:
+        logging.info("收到停止信号，正在关闭服务...")
+        await service.stop()
+
+if __name__ == '__main__':
+    asyncio.run(main())
+```
+
+#### Linux系统服务启动脚本
+
+创建 `/opt/data_analysis/start.sh`：
 
 ```bash
 #!/bin/bash
@@ -145,14 +265,19 @@ source /opt/data_analysis/venv/bin/activate
 
 # 设置环境变量
 export PYTHONPATH=/opt/data_analysis
-export DATA_ANALYSIS_CONFIG=/opt/data_analysis/config/config.py
+export DATA_ANALYSIS_LOG=/var/log/data_analysis/app.log
 
-# 启动服务
-# 同步服务示例
-gunicorn -w 4 -b 0.0.0.0:8000 data_analysis.main:sync_app
+# 启动服务（选择同步或异步）
+cd /opt/data_analysis
+python sync_main.py
 
-# 异步服务示例
-# gunicorn -w 4 -k gunicorn.workers.gthread -b 0.0.0.0:8000 data_analysis.async_main:async_app
+# 或使用异步服务
+# python async_main.py
+```
+
+使脚本可执行：
+```bash
+chmod +x /opt/data_analysis/start.sh
 ```
 
 ### 4. 系统服务配置（Linux）
@@ -165,17 +290,17 @@ Description=Data Analysis Service
 After=network.target
 
 [Service]
-Type=forking
+Type=simple
 User=analysis
 Group=analysis
 WorkingDirectory=/opt/data_analysis
 Environment=PYTHONPATH=/opt/data_analysis
-Environment=DATA_ANALYSIS_CONFIG=/opt/data_analysis/config/config.py
-ExecStart=/opt/data_analysis/start.sh
-ExecReload=/bin/kill -s HUP $MAINPID
-KillMode=mixed
-TimeoutStopSec=5
-PrivateTmp=true
+Environment=DATA_ANALYSIS_LOG=/var/log/data_analysis/app.log
+ExecStart=/opt/data_analysis/venv/bin/python /opt/data_analysis/sync_main.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/data_analysis/stdout.log
+StandardError=append:/var/log/data_analysis/stderr.log
 
 [Install]
 WantedBy=multi-user.target
@@ -184,9 +309,20 @@ WantedBy=multi-user.target
 然后启用并启动服务：
 
 ```bash
+# 创建日志目录
+sudo mkdir -p /var/log/data_analysis
+sudo chown analysis:analysis /var/log/data_analysis
+
+# 启用并启动服务
 sudo systemctl daemon-reload
 sudo systemctl enable data_analysis
 sudo systemctl start data_analysis
+
+# 查看服务状态
+sudo systemctl status data_analysis
+
+# 查看日志
+sudo journalctl -u data_analysis -f
 ```
 
 ### 5. 容器化部署
@@ -194,12 +330,12 @@ sudo systemctl start data_analysis
 创建`Dockerfile`：
 
 ```dockerfile
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y gcc
+# 安装系统依赖（如需要）
+# RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件
 COPY requirements.txt .
@@ -208,24 +344,55 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
-COPY . .
+COPY d_a/ ./d_a/
+COPY sync_main.py .
+COPY async_main.py .
 
 # 创建非root用户
-RUN useradd -m -u 1000 analysis && chown -R analysis:analysis /app
+RUN useradd -m -u 1000 analysis && \
+    mkdir -p /var/log/data_analysis && \
+    chown -R analysis:analysis /app /var/log/data_analysis
+
 USER analysis
 
-# 设置入口点
-CMD ["gunicorn", "-w", "4", "-b", "0.0.0.0:8000", "data_analysis.main:sync_app"]
+# 设置环境变量
+ENV PYTHONPATH=/app
+ENV DATA_ANALYSIS_LOG=/var/log/data_analysis/app.log
+
+# 默认启动同步服务
+CMD ["python", "sync_main.py"]
+```
+
+创建 `requirements.txt`：
+
+```txt
+kafka-python>=2.0.2
+aiokafka>=0.7.2
 ```
 
 构建和运行：
 
 ```bash
 # 构建镜像
-docker build -t data_analysis .
+docker build -t data_analysis:v1.1 .
 
-# 运行容器
-docker run -d --name data_analysis   -p 8000:8000   -v /opt/data_analysis/config:/app/config   data_analysis
+# 运行容器（同步服务）
+docker run -d \
+  --name data_analysis_sync \
+  -v /path/to/config.py:/app/d_a/config.py \
+  -v /path/to/logs:/var/log/data_analysis \
+  data_analysis:v1.1
+
+# 运行容器（异步服务）
+docker run -d \
+  --name data_analysis_async \
+  -v /path/to/config.py:/app/d_a/config.py \
+  -v /path/to/logs:/var/log/data_analysis \
+  data_analysis:v1.1 \
+  python async_main.py
+
+# 查看日志
+docker logs -f data_analysis_sync
 ```
 
 ### 6. Kubernetes部署
@@ -237,6 +404,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: data-analysis
+  namespace: production
 spec:
   replicas: 3
   selector:
@@ -249,98 +417,257 @@ spec:
     spec:
       containers:
       - name: data-analysis
-        image: data_analysis:latest
-        ports:
-        - containerPort: 8000
+        image: data_analysis:v1.1
         env:
         - name: PYTHONPATH
           value: "/app"
-        - name: DATA_ANALYSIS_CONFIG
-          value: "/app/config/config.py"
+        - name: DATA_ANALYSIS_LOG
+          value: "/var/log/data_analysis/app.log"
         volumeMounts:
         - name: config-volume
-          mountPath: /app/config
+          mountPath: /app/d_a/config.py
+          subPath: config.py
+        - name: log-volume
+          mountPath: /var/log/data_analysis
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 30
       volumes:
       - name: config-volume
         configMap:
           name: data-analysis-config
+      - name: log-volume
+        emptyDir: {}
 ```
 
-创建`configmap.yaml`：
+创建 `service.yaml`（如果需要对外暴露）：
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: data-analysis-service
+  namespace: production
+spec:
+  selector:
+    app: data-analysis
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 8080
+  type: ClusterIP
+```
+
+创建 `configmap.yaml`：
 
 ```yaml
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: data-analysis-config
+  namespace: production
 data:
   config.py: |
-    # 配置文件内容
-    # 推荐使用嵌套格式，分别配置消费者和生产者参数
+    # -*- coding: utf-8 -*-
+    """
+    配置文件
+    """
+    
+    # Kafka配置（嵌套格式，推荐）
     KAFKA_CONFIG = {
         'consumer': {
-            'bootstrap_servers': ['kafka-service:9092'],
-            'group_id': 'data_analysis_group',
+            'bootstrap_servers': ['kafka-broker-1:9092', 'kafka-broker-2:9092', 'kafka-broker-3:9092'],
+            'group_id': 'data_analysis_prod',
             'auto_offset_reset': 'latest',
             'enable_auto_commit': True,
             'max_poll_records': 500,
             'session_timeout_ms': 30000,
+            'request_timeout_ms': 40000,
+            'heartbeat_interval_ms': 3000,
         },
         'producer': {
-            'bootstrap_servers': ['kafka-service:9092'],
+            'bootstrap_servers': ['kafka-broker-1:9092', 'kafka-broker-2:9092', 'kafka-broker-3:9092'],
             'acks': 'all',
             'retries': 3,
+            'max_in_flight_requests_per_connection': 5,
             'compression_type': 'gzip',
+            'linger_ms': 10,
+            'batch_size': 16384,
         }
     }
+    
+    # Topic配置（注意使用camelCase字段名）
+    TOPIC_DETAIL = {
+        'SCHEDULE-STATION-PARAM': {
+            'fields': ['stationId', 'stationTemp', 'lat', 'lng', ...],
+            'frequency': '新建站或配置更改时',
+            'modules': ['load_prediction', 'operation_optimization'],
+            'window_size': 1
+        },
+        # 其他topic配置...
+    }
+    
+    # 模块依赖配置
+    MODULE_DEPENDENCIES = {
+        'operation_optimization': ['load_prediction'],
+        'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
+        # 其他依赖配置...
+    }
+    
+    # 模块输出topic映射
+    MODULE_OUTPUT_TOPICS = {
+        'load_prediction': 'MODULE-OUTPUT-LOAD-PREDICTION',
+        'operation_optimization': 'MODULE-OUTPUT-OPERATION-OPTIMIZATION',
+        # 其他模块...
+    }
+
+```
+
+部署应用：
+
+```bash
+# 创建命名空间
+kubectl create namespace production
+
+# 应用配置
+kubectl apply -f configmap.yaml
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# 查看部署状态
+kubectl get pods -n production
+kubectl get svc -n production
+
+# 查看日志
+kubectl logs -f deployment/data-analysis -n production
+
+# 扩容
+kubectl scale deployment/data-analysis --replicas=5 -n production
 ```
 
 ## 监控和日志
 
 ### 日志配置
 
-修改`data_analysis/__init__.py`中的日志配置：
+data_analysis模块使用Python标准logging模块，日志配置在代码中设置。
+
+**日志文件位置**：
+- 主日志文件：`data_analysis.log`（默认在当前目录，可通过环境变量 `DATA_ANALYSIS_LOG` 指定）
+- 格式：`[时间戳] 日志级别 模块名 消息内容`
+- 编码：UTF-8
+- 轮转：建议使用 `RotatingFileHandler`，每个文件最大10MB，保留5个备份
+
+**日志级别**：
+- `INFO`：正常操作信息（服务启动、数据处理、配置热更新等）
+- `ERROR`：错误信息（Kafka连接失败、数据解析错误、回调异常等）
+- `DEBUG`：调试信息（详细的数据流、中间状态等）
+
+**日志配置示例**：
 
 ```python
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
-# 日志支持多级别和文件输出
-LOG_FORMAT = "[%(asctime)s] %(levelname)s %(name)s %(message)s"
+# 日志文件路径（可通过环境变量指定）
 LOG_FILE = os.getenv("DATA_ANALYSIS_LOG", "data_analysis.log")
+LOG_FORMAT = "[%(asctime)s] %(levelname)s %(name)s %(message)s"
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+# 配置日志
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, LOG_LEVEL),
     format=LOG_FORMAT,
     handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(LOG_FILE, encoding="utf-8"),
-        logging.handlers.RotatingFileHandler(
-            LOG_FILE, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8"
-        ),
-    ],
+        logging.StreamHandler(),  # 控制台输出
+        RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5,
+            encoding="utf-8"
+        )
+    ]
 )
+```
+
+**环境变量配置**：
+```bash
+# Linux
+export DATA_ANALYSIS_LOG=/var/log/data_analysis/app.log
+export LOG_LEVEL=INFO
+
+# Windows PowerShell
+$env:DATA_ANALYSIS_LOG="C:\logs\data_analysis\app.log"
+$env:LOG_LEVEL="INFO"
 ```
 
 ### 监控指标
 
+建议监控以下关键指标：
+
 1. **服务状态指标**：
-   
-   - 服务是否正常运行
-   - 主线程状态
-   - Kafka连接状态
-   - 场站任务数量和状态
+   - 服务进程是否正常运行
+   - 主线程状态（使用 `get_service_status()` API）
+   - Kafka消费者/生产者连接状态
+   - 活跃场站数量和任务状态（使用 `get_station_status()` API）
+
 2. **性能指标**：
-   
-   - 数据处理速率
+   - Kafka消费延迟（lag）
+   - 数据处理速率（条/秒）
+   - 回调处理耗时
    - 内存使用率
    - CPU使用率
-   - Kafka消费/生产延迟
+
 3. **业务指标**：
-   
-   - 各模块处理数据量
-   - 错误率
-   - 回调处理时间
+   - 各场站数据接收量
+   - 错误率（按错误类型分类）
+   - 数据窗口缓存大小
+   - 模块依赖聚合成功率
+
+**健康检查API示例**：
+
+```python
+def health_check():
+    """
+    健康检查函数，可集成到监控系统
+    """
+    from d_a import DataAnalysisService
+    
+    service = DataAnalysisService()  # 获取服务实例
+    
+    # 获取服务状态
+    service_status = service.get_service_status()
+    station_status = service.get_station_status()
+    
+    health = {
+        "status": "healthy" if service_status.get('main_thread_alive') else "unhealthy",
+        "timestamp": time.time(),
+        "service": {
+            "main_thread": service_status.get('main_thread_alive', False),
+            "consumer_alive": service_status.get('consumer_alive', False),
+            "producer_alive": service_status.get('producer_alive', False),
+            "station_count": service_status.get('station_count', 0)
+        },
+        "stations": {
+            sid: {"running": info.get('running', False)}
+            for sid, info in station_status.items()
+        }
+    }
+    
+    return health
+```
 
 ### Prometheus监控集成
 

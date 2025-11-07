@@ -9,19 +9,27 @@ filename: station_param.py
 version: 1.0
 """
 
-from ..parser_base import ParserBase
+from ..parser_base import ConfigBasedParser
 
-class StationParamParser(ParserBase):
-    def parse(self, raw_data):
-        # 解析SCHEDULE-STATION-PARAM
-        return {
-            'station_id': raw_data.get('station_id'),
-            'station_temp': raw_data.get('station_temp'),
-            'lat': raw_data.get('lat'),
-            'lng': raw_data.get('lng'),
-            'gun_count': raw_data.get('gun_count'),
-            'grid_capacity': raw_data.get('grid_capacity'),
-            'storage_count': raw_data.get('storage_count'),
-            'storage_capacity': raw_data.get('storage_capacity'),
-            'host_id': raw_data.get('host_id'),
-        }
+# 使用通用的基于配置的解析器
+# 字段自动从 config.TOPIC_DETAIL['SCHEDULE-STATION-PARAM']['fields'] 读取
+class StationParamParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-STATION-PARAM')
+
+# 如果需要自定义解析逻辑，可以覆盖 parse 方法：
+# class StationParamParser(ConfigBasedParser):
+#     def __init__(self):
+#         super().__init__(topic_name='SCHEDULE-STATION-PARAM')
+#     
+#     def parse(self, raw_data):
+#         # 先调用父类方法获取基础字段
+#         parsed_data = super().parse(raw_data)
+#         
+#         # 添加自定义处理逻辑
+#         if parsed_data:
+#             # 例如：字段转换、计算衍生字段等
+#             parsed_data['custom_field'] = parsed_data.get('stationId', '') + '_processed'
+#         
+#         return parsed_data
+

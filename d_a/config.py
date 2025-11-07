@@ -45,31 +45,31 @@ TOPIC_DETAIL = {
     'SCHEDULE-STATION-REALTIME-DATA': {
         'fields': ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg'],
         'frequency': '1小时1次，推送7天',
-        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
+        'modules': ['load_prediction', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
         'window_size': 7*24
     },
     'SCHEDULE-ENVIRONMENT-CALENDAR': {
         'fields': ['dayOfWeek', 'holiday'],
         'frequency': '1年1次',
-        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
+        'modules': ['load_prediction', 'electricity_price', 'SOH_model'],
         'window_size': 1
     },
     'SCHEDULE-DEVICE-METER': {
         'fields': ['meterId', 'meterPower', 'rmeterLimitPower'],
         'frequency': '5分钟1次',
-        'modules': ['operation_optimization', 'electricity_price'],
+        'modules': ['electricity_price'],
         'window_size': 7*24*12
     },
     'SCHEDULE-DEVICE-GUN': {
         'fields': ['hostCode', 'gunNo', 'status'],
         'frequency': '15秒1次',
-        'modules': ['operation_optimization'],
+        'modules': [],
         'window_size': 7*24*60*4
     },
     'SCHEDULE-CAR-ORDER': {
         'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
         'frequency': '1秒1次',
-        'modules': ['load_prediction', 'operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
+        'modules': ['operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
         'window_size': 7*24*60*60
     },
     'SCHEDULE-CAR-PRICE': {
@@ -81,7 +81,7 @@ TOPIC_DETAIL = {
     'SCHEDULE-DEVICE-ERROR': {
         'fields': ['stationId', 'hostError', 'acError', 'dcError', 'terminalError', 'storageError'],
         'frequency': '触发推送',
-        'modules': ['operation_optimization', 'SOH_model'],
+        'modules': ['SOH_model'],
         'window_size': 10
     },
     'SCHEDULE-DEVICE-HOST-DCDC': {
@@ -93,7 +93,7 @@ TOPIC_DETAIL = {
     'SCHEDULE-DEVICE-HOST-ACDC': {
         'fields': ['hostCode', 'acPower'],
         'frequency': '充电时1秒1次，非充电15秒1次',
-        'modules': ['evaluation_model', 'thermal_management', 'operation_optimization'],
+        'modules': ['evaluation_model', 'thermal_management'],
         'window_size': 1
     },
     'SCHEDULE-DEVICE-STORAGE': {

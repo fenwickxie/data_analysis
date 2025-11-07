@@ -9,16 +9,11 @@ filename: station_realtime_data.py
 version: 1.0
 """
 
-from ..parser_base import ParserBase
+from ..parser_base import ConfigBasedParser
 
-class StationRealtimeDataParser(ParserBase):
-    def parse(self, raw_data):
-        # 解析SCHEDULE-STATION-REALTIME-DATA
-        return {
-            'station_id': raw_data.get('station_id'),
-            'gun_id': raw_data.get('gun_id'),
-            'history_curve_gun_avg': raw_data.get('history_curve_gun_avg'),
-            'history_curve_gun_max': raw_data.get('history_curve_gun_max'),
-            'history_curve_station_avg': raw_data.get('history_curve_station_avg'),
-            'history_curve_station_max': raw_data.get('history_curve_station_max'),
-        }
+# 使用通用的基于配置的解析器
+# 字段自动从 config.TOPIC_DETAIL['SCHEDULE-STATION-REALTIME-DATA']['fields'] 读取
+class StationRealtimeDataParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-STATION-REALTIME-DATA')
+

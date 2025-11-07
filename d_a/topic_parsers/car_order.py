@@ -9,24 +9,11 @@ filename: car_order.py
 version: 1.0
 """
 
-from ..parser_base import ParserBase
+from ..parser_base import ConfigBasedParser
 
-class CarOrderParser(ParserBase):
-    def parse(self, raw_data):
-        # 解析SCHEDULE-CAR-ORDER
-        return {
-            'station_id': raw_data.get('station_id'),
-            'order_id': raw_data.get('order_id'),
-            'charger_id': raw_data.get('charger_id'),
-            'gun_id': raw_data.get('gun_id'),
-            'charger_rated_current': raw_data.get('charger_rated_current'),
-            'start_time': raw_data.get('start_time'),
-            'end_time': raw_data.get('end_time'),
-            'start_SOC': raw_data.get('start_SOC'),
-            'current_SOC': raw_data.get('current_SOC'),
-            'demand_voltage': raw_data.get('demand_voltage'),
-            'demand_current': raw_data.get('demand_current'),
-            'mileage': raw_data.get('mileage'),
-            'car_model': raw_data.get('car_model'),
-            'battery_capacity': raw_data.get('battery_capacity'),
-        }
+# 使用通用的基于配置的解析器
+# 字段自动从 config.TOPIC_DETAIL['SCHEDULE-CAR-ORDER']['fields'] 读取
+class CarOrderParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-CAR-ORDER')
+
