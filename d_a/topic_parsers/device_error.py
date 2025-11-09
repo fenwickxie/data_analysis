@@ -2,23 +2,30 @@
 # -*- coding: utf-8 -*-
 
 """
-author: xie.fangyu
-date: 2025-10-16 11:08:36
-project: data_analysis
-filename: device_error.py
-version: 1.0
+自动更新：使用基于配置的解析器
+字段自动从 config.TOPIC_DETAIL['SCHEDULE-DEVICE-ERROR']['fields'] 读取
 """
 
-from ..parser_base import ParserBase
+from ..parser_base import ConfigBasedParser
 
-class DeviceErrorParser(ParserBase):
-    def parse(self, raw_data):
-        # 解析SCHEDULE-DEVICE-ERROR
-        return {
-            'station_id': raw_data.get('station_id'),
-            'host_error': raw_data.get('host_error'),
-            'ac_error': raw_data.get('ac_error'),
-            'dc_error': raw_data.get('dc_error'),
-            'terminal_error': raw_data.get('terminal_error'),
-            'storage_error': raw_data.get('storage_error'),
-        }
+class DeviceErrorParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-DEVICE-ERROR')
+
+
+# 如果需要自定义解析逻辑，可以覆盖 parse 方法：
+# 
+# class DeviceErrorParser(ConfigBasedParser):
+#     def __init__(self):
+#         super().__init__(topic_name='SCHEDULE-DEVICE-ERROR')
+#     
+#     def parse(self, raw_data):
+#         # 先调用父类方法获取基础字段
+#         parsed_data = super().parse(raw_data)
+#         
+#         if parsed_data:
+#             # 添加自定义处理逻辑
+#             # 例如：类型转换、计算衍生字段等
+#             pass
+#         
+#         return parsed_data

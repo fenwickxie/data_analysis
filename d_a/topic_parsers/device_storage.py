@@ -2,25 +2,30 @@
 # -*- coding: utf-8 -*-
 
 """
-author: xie.fangyu
-date: 2025-10-16 11:08:56
-project: data_analysis
-filename: device_storage.py
-version: 1.0
+自动更新：使用基于配置的解析器
+字段自动从 config.TOPIC_DETAIL['SCHEDULE-DEVICE-STORAGE']['fields'] 读取
 """
 
-from ..parser_base import ParserBase
+from ..parser_base import ConfigBasedParser
 
-class DeviceStorageParser(ParserBase):
-    def parse(self, raw_data):
-        # 解析SCHEDULE-DEVICE-STORAGE
-        return {
-            'host_id': raw_data.get('host_id'),
-            'storage_id': raw_data.get('storage_id'),
-            'storage_power': raw_data.get('storage_power'),
-            'storage_current': raw_data.get('storage_current'),
-            'storage_temp_max': raw_data.get('storage_temp_max'),
-            'storage_temp_min': raw_data.get('storage_temp_min'),
-            'storage_SOC': raw_data.get('storage_SOC'),
-            'storage_SOH': raw_data.get('storage_SOH'),
-        }
+class DeviceStorageParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-DEVICE-STORAGE')
+
+
+# 如果需要自定义解析逻辑，可以覆盖 parse 方法：
+# 
+# class DeviceStorageParser(ConfigBasedParser):
+#     def __init__(self):
+#         super().__init__(topic_name='SCHEDULE-DEVICE-STORAGE')
+#     
+#     def parse(self, raw_data):
+#         # 先调用父类方法获取基础字段
+#         parsed_data = super().parse(raw_data)
+#         
+#         if parsed_data:
+#             # 添加自定义处理逻辑
+#             # 例如：类型转换、计算衍生字段等
+#             pass
+#         
+#         return parsed_data

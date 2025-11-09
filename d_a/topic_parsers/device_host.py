@@ -2,21 +2,17 @@
 # -*- coding: utf-8 -*-
 
 """
-author: xie.fangyu
-date: 2025-10-16 11:08:47
-project: data_analysis
-filename: device_host.py
-version: 1.0
+自动更新：使用基于配置的解析器
+包含 DCDC 和 ACDC 两个解析器
 """
 
-from ..parser_base import ParserBase
+from ..parser_base import ConfigBasedParser
 
-class DeviceHostParser(ParserBase):
-    def parse(self, raw_data):
-        # 解析SCHEDULE-DEVICE-HOST
-        return {
-            'host_id': raw_data.get('host_id'),
-            'acdc_status': raw_data.get('acdc_status'),
-            'dcdc_input_power': raw_data.get('dcdc_input_power'),
-            'acdc_input_power': raw_data.get('acdc_input_power'),
-        }
+class DeviceHostDCDCParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-DEVICE-HOST-DCDC')
+
+
+class DeviceHostACDCParser(ConfigBasedParser):
+    def __init__(self):
+        super().__init__(topic_name='SCHEDULE-DEVICE-HOST-ACDC')
