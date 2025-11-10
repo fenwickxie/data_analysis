@@ -108,7 +108,7 @@ KAFKA_CONFIG = {
         'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
         'group_id': 'data_analysis_group',
         'auto_offset_reset': 'latest',
-        'enable_auto_commit': True,
+        'enable_auto_commit': False,  # 关闭自动提交，使用手动offset管理
         'max_poll_records': 500,
         'session_timeout_ms': 30000,
         'request_timeout_ms': 40000,
@@ -124,14 +124,52 @@ KAFKA_CONFIG = {
         'batch_size': 16384,  # 批量大小
     }
 }
+
+# Offset管理配置（v1.1新增）
+OFFSET_COMMIT_CONFIG = {
+    'commit_interval_seconds': 5.0,  # 定时提交间隔（秒）
+    'commit_batch_size': 100,        # 累积消息数提交阈值
+    'max_commit_retries': 3,         # 提交失败重试次数
+    'commit_retry_delay': 1.0,       # 重试延迟（秒）
+}
 ```
 
 **配置说明**：
 
 - `bootstrap_servers`: 配置多个Kafka broker地址以支持高可用
+- `enable_auto_commit=False`: **生产环境强烈建议关闭自动提交**，使用手动offset管理确保消息处理可靠性
 - `acks='all'`: 生产环境建议使用，等待所有副本确认，确保数据不丢失
 - `compression_type='gzip'`: 启用压缩可以节省网络带宽和存储空间
 - `max_poll_records=500`: 根据数据量和处理能力调整，避免消费超时
+
+**Offset管理策略**（v1.1）：
+
+系统提供了线程安全且鲁棒的手动offset提交机制，具有以下特性：
+
+1. **双重触发机制**：
+   - **批次触发**：当处理消息数达到`commit_batch_size`时自动提交
+   - **定时触发**：达到`commit_interval_seconds`时间间隔时自动提交
+   - 确保即使消息量较少也能定期提交offset
+
+2. **失败处理**：
+   - 只提交成功处理的消息offset，部分失败的消息会在重启后重新处理
+   - 提交失败时自动重试（最多`max_commit_retries`次）
+   - 保留未成功提交的offset供下次重试
+
+3. **崩溃恢复**：
+   - 服务停止前自动提交所有待处理offset
+   - 异常崩溃时未提交的消息会在重启后重新处理
+   - 确保"至少一次"语义，不会丢失消息
+
+4. **线程安全**：
+   - 使用asyncio.Lock确保offset提交的原子性
+   - 避免并发提交导致的数据不一致
+
+**调优建议**：
+
+- 低延迟场景：减小`commit_interval_seconds`（如2-3秒），增加提交频率
+- 高吞吐场景：增大`commit_batch_size`（如500-1000），减少提交频率
+- 消息处理耗时长：适当增大两个参数值，避免频繁提交影响性能
 
 #### 窗口和补全配置
 

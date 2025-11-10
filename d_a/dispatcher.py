@@ -118,7 +118,6 @@ class DataDispatcher:
         self.data_cache = {}
         self.data_expire_seconds = data_expire_seconds
         self.lock = threading.RLock()
-        self.padding_strategy = "zero"  # 默认零填充
 
     def update_topic_data(self, station_id, topic, raw_data):
         """
@@ -159,41 +158,59 @@ class DataDispatcher:
         return [item[0] for item in self.data_cache[station_id][topic]]
 
     def get_module_input(self, station_id, module):
-        # 整合该场站所有topic窗口数据，组装为模块输入。输入数据已经是窗口结构，直接展开。
+        """
+        整合该场站所有topic窗口数据，组装为模块输入（在这里完成解析）。
+        将窗口内的时序数据拼接成列表形式。
+        
+        Args:
+            station_id (str): 场站ID
+            module (str): 模块名称
+            
+        Returns:
+            dict: 模块输入数据，格式由各topic parser的parse_window方法决定
+        """
         try:
+            # 使用线程锁确保线程安全
             with self.lock:
+                # 检查场站ID是否存在于缓存中
                 if station_id not in self.data_cache:
                     return None
-                input_data = {}
+                
+                # 初始化输入数据字典，包含场站ID
+                input_data = {'stationId': station_id}
+                
+                # 处理模块所需的topic数据
                 for topic in MODULE_TO_TOPICS.get(module, []):
+                    # 获取指定topic的窗口数据
                     window = self.get_topic_window(station_id, topic)
-                    win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
+                    
                     if window:
-                        try:
-                            parsed = TOPIC_PARSER_MAP[topic].parse(window[-1])
-                        except Exception as e:
-                            handle_error(
-                                DispatcherError(e),
-                                context=f"topic解析 topic={topic}, station_id={station_id}",
-                            )
-                            parsed = None
-                        if isinstance(parsed, dict):
-                            for key, value in parsed.items():
-                                if isinstance(value, list):
-                                    latest_window = value[-win_size:] if win_size else value
-                                    input_data[f"{key}_window"] = latest_window
-                                    input_data[key] = latest_window[-1] if latest_window else None
-                                else:
-                                    input_data[key] = value
-                        elif parsed is not None:
-                            input_data[topic] = parsed
+                        # 调用topic parser的parse_window方法
+                        # 各topic parser可以实现自己的窗口数据处理逻辑
+                        parser = TOPIC_PARSER_MAP.get(topic)
+                        if parser:
+                            try:
+                                # 解析窗口数据并更新到输入数据中
+                                parsed_data = parser.parse_window(window) # 完成枪号对齐、插值、格式化等所有处理
+                                if parsed_data:
+                                    input_data.update(parsed_data)
+                            except Exception as e:
+                                # 处理解析错误
+                                handle_error(
+                                    DispatcherError(e),
+                                    context=f"解析窗口数据 topic={topic}, station_id={station_id}",
+                                )
                     else:
-                        for f in TOPIC_DETAIL.get(topic, {}).get("fields", []):
-                            input_data[f"{f}_window"] = []
-                            input_data[f] = None
+                        # 窗口为空，添加空列表
+                        fields = TOPIC_DETAIL.get(topic, {}).get("fields", [])
+                        for field in fields:
+                            input_data[field] = []
+                        input_data['sendTime'] = []
+                
                 # 依赖其他模块输出（通过Kafka topic获取）
                 deps = MODULE_DEPENDENCIES.get(module, [])
                 for dep in deps:
+                    # 获取依赖模块的输出topic
                     output_topic = MODULE_OUTPUT_TOPICS.get(dep)
                     if not output_topic:
                         continue
@@ -202,9 +219,14 @@ class DataDispatcher:
                         continue
                     parser = TOPIC_PARSER_MAP.get(output_topic)
                     try:
-                        parsed_values = (
-                            [parser.parse(d) for d in dep_window] if parser else list(dep_window)
-                        )
+                        if parser and hasattr(parser, 'parse_window'):
+                            # 使用parse_window处理窗口数据
+                            parsed_values = parser.parse_window(dep_window)
+                        else:
+                            # 回退到逐条解析
+                            parsed_values = (
+                                [parser.parse(d) for d in dep_window] if parser else list(dep_window)
+                            )
                     except Exception as e:
                         handle_error(
                             DispatcherError(e),
@@ -213,13 +235,10 @@ class DataDispatcher:
                         parsed_values = []
                     if not parsed_values:
                         continue
-                    latest = parsed_values[-1]
-                    input_data[f"{dep}_output_window"] = latest
-                    if isinstance(latest, dict):
-                        for key, value in latest.items():
-                            input_data[f"{dep}_{key}"] = value
-                    else:
-                        input_data[f"{dep}_output"] = latest
+                    
+                    input_data[f"{dep}_output"] = parsed_values
+                
+                # 调用模块解析器（如果需要进一步处理）
                 try:
                     return self.parsers[module].parse(input_data)
                 except Exception as e:
@@ -227,7 +246,8 @@ class DataDispatcher:
                         DispatcherError(e),
                         context=f"模块解析 module={module}, station_id={station_id}",
                     )
-                    return None
+                    return input_data  # 解析失败时返回原始input_data
+                    
         except Exception as e:
             handle_error(
                 DispatcherError(e),
@@ -236,6 +256,7 @@ class DataDispatcher:
             return None
 
     def get_all_inputs(self, station_id):
+        """获取场站的所有模块输入（触发解析）"""
         with self.lock:
             if station_id not in self.data_cache:
                 return {}

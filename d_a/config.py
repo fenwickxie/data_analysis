@@ -34,6 +34,14 @@ KAFKA_CONFIG = {
     }
 }
 
+# Offset管理配置
+OFFSET_COMMIT_CONFIG = {
+    'commit_interval_seconds': 5.0,  # 定时提交间隔（秒）
+    'commit_batch_size': 100,        # 累积消息数提交阈值
+    'max_commit_retries': 3,         # 提交失败重试次数
+    'commit_retry_delay': 1.0,       # 重试延迟（秒）
+}
+
 # topic详细配置
 TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {

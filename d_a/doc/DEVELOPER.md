@@ -509,6 +509,87 @@ KAFKA_CONFIG = {
 - 使用多个broker地址提高高可用性
 - 合理配置超时参数避免频繁重连
 
+#### Offset管理配置（v1.1新增）
+
+**为什么需要手动offset管理？**
+
+自动提交offset（`enable_auto_commit=True`）存在以下问题：
+1. 消息可能在处理完成前就被提交，导致消息丢失
+2. 处理失败的消息也会被标记为已消费
+3. 无法实现精确的"至少一次"或"恰好一次"语义
+
+**手动offset管理机制**（`enable_auto_commit=False`）：
+
+```python
+# config.py中的offset管理配置
+OFFSET_COMMIT_CONFIG = {
+    'commit_interval_seconds': 5.0,  # 定时提交间隔（秒）
+    'commit_batch_size': 100,        # 累积消息数提交阈值
+    'max_commit_retries': 3,         # 提交失败重试次数
+    'commit_retry_delay': 1.0,       # 重试延迟（秒）
+}
+```
+
+**实现特性**：
+
+1. **双重触发机制**：
+   ```python
+   # 批次触发
+   if processed_count >= commit_batch_size:
+       await commit_offsets()
+   
+   # 定时触发
+   if time.time() - last_commit_time >= commit_interval_seconds:
+       await commit_offsets()
+   ```
+
+2. **处理流程**：
+   ```
+   消费消息 → 尝试处理 → 处理成功？
+                              ↓ 是
+                        记录offset到pending_offsets
+                              ↓
+                        达到提交条件？
+                              ↓ 是
+                        提交所有pending_offsets
+                              ↓
+                        清空pending_offsets
+   ```
+
+3. **失败处理**：
+   - 处理失败的消息：不记录offset，重启后重新消费
+   - 提交失败：保留pending_offsets，下次继续尝试
+   - 多次重试：最多重试`max_commit_retries`次
+
+4. **崩溃恢复**：
+   - 正常停止：finally块中提交所有pending_offsets
+   - 异常崩溃：未提交的消息重启后重新消费
+   - 确保"至少一次"语义
+
+**性能调优**：
+
+| 场景 | commit_interval_seconds | commit_batch_size | 说明 |
+|------|------------------------|-------------------|------|
+| 低延迟 | 2-3 | 50-100 | 更频繁提交，减少崩溃后重复处理量 |
+| 高吞吐 | 10-15 | 500-1000 | 减少提交频率，提升整体吞吐量 |
+| 均衡 | 5 | 100 | 默认配置，适合大多数场景 |
+| 消息大 | 5-10 | 20-50 | 消息处理耗时，减少批次大小 |
+
+**监控指标**：
+
+```python
+# 关键日志输出
+logging.info(f"成功提交 {committed_count} 个分区的offset，共处理 {processed} 条消息")
+logging.warning(f"Offset提交失败，保留 {pending_count} 个待处理offset")
+logging.error(f"达到最大重试次数，offset提交失败")
+```
+
+建议监控：
+- offset提交成功率
+- pending_offsets大小
+- 平均提交延迟
+- 重启后重复处理的消息数
+
 #### 窗口大小配置建议
 
 根据数据特点选择合适的窗口大小：
@@ -543,11 +624,15 @@ TOPIC_DETAIL = {
 1. **Kafka消费/生产速度**：高频数据（15秒间隔）可能导致Kafka成为瓶颈
    - 优化方案：增加Kafka分区数，启用消息压缩（gzip）
    
-2. **内存使用**：大量场站和历史数据窗口缓存可能导致内存压力
+2. **Offset提交开销**（v1.1新增）：频繁提交offset会增加与Kafka的网络交互
+   - 监控指标：offset提交频率、提交延迟
+   - 优化方案：根据消息量调整`commit_batch_size`和`commit_interval_seconds`
+   
+3. **内存使用**：大量场站和历史数据窗口缓存可能导致内存压力
    - 监控指标：窗口缓存大小、场站数量、数据过期时间
    - 优化方案：合理设置 `data_expire_seconds`，定期清理过期数据
    
-3. **CPU使用**：数据解析、依赖聚合可能消耗较多CPU资源
+4. **CPU使用**：数据解析、依赖聚合可能消耗较多CPU资源
    - 监控指标：回调处理耗时、解析器执行时间
    - 优化方案：优化解析逻辑，减少不必要的数据复制
    

@@ -82,9 +82,20 @@ async def main():
 
     producer = AsyncKafkaProducerClient(KAFKA_CONFIG)
     await producer.start()
-
+    # 方式1: 使用默认配置（推荐）
     service = AsyncDataAnalysisService(module_name=MODULE_NAME)
-
+    # 方式2: 自定义offset配置
+    # custom_offset_config = {
+    #     'commit_interval_seconds': 3.0,  # 更频繁提交
+    #     'commit_batch_size': 50,         # 更小批次
+    #     'max_commit_retries': 5,
+    #     'commit_retry_delay': 2.0,
+    # }
+    # service = AsyncDataAnalysisService(
+    #     module_name='load_prediction',
+    #     result_handler=my_result_handler,
+    #     offset_commit_config=custom_offset_config
+    # )
     async def result_handler(station_id, module_input, result):
         if result is None:
             return
@@ -98,15 +109,20 @@ async def main():
             await producer.send(output_topic, payload)
         except Exception as exc:  # noqa: BLE001
             logging.error("Kafka上传失败", exc_info=exc)
-
+    
     await service.start(callback=my_callback, result_handler=result_handler)
     try:
+        # await asyncio.Event().wait()  # 永久等待，简单等待，不打印状态
         while True:  # 模拟主循环
             print(service.get_station_status())
-            await asyncio.sleep(1)
+            await asyncio.sleep(10)
+    except KeyboardInterrupt:
+        logging.info("收到停止信号，开始停机...")
     finally:
+        # 停止服务（会自动提交所有pending offsets）
         await service.stop()
         await producer.stop()
+        logging.info("服务已停止")
 
 
 if __name__ == "__main__":

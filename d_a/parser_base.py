@@ -22,6 +22,36 @@ class ParserBase(ABC):
         :return: dict
         """
         pass
+    
+    def parse_window(self, window_data):
+        """
+        解析窗口数据（时序数据列表）
+        子类可以重写此方法实现自定义的窗口数据处理逻辑，如：
+        - 枪号对齐
+        - 数据插值
+        - 特征工程
+        
+        默认实现：简单地对每条数据调用parse()，返回列表
+        
+        Args:
+            window_data: 窗口内的原始数据列表 [raw_data1, raw_data2, ...]
+            
+        Returns:
+            dict: 处理后的窗口数据，格式为 {field: [value1, value2, ...], ...}
+        """
+        # 默认实现：简单拼接
+        result = {}
+        
+        for raw_data in window_data:
+            parsed = self.parse(raw_data)
+            
+            if parsed:
+                for key, value in parsed.items():
+                    if key not in result:
+                        result[key] = []
+                    result[key].append(value)
+        
+        return result
 
 
 class ConfigBasedParser(ParserBase):

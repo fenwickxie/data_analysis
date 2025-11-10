@@ -231,6 +231,36 @@ class AsyncKafkaConsumerClient:
         except Exception as e:
             logging.error(f"AsyncKafkaConsumer getone异常: {e}")
             raise
+    
+    async def commit_offsets(self, offsets=None):
+        """
+        手动提交offset
+        
+        Args:
+            offsets: 可选的TopicPartition到OffsetAndMetadata的字典
+                    如果为None,则提交当前消费位置
+        
+        Returns:
+            bool: 提交是否成功
+        """
+        if self.consumer is None:
+            raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
+        
+        try:
+            if offsets:
+                # 提交指定的offsets
+                await self.consumer.commit(offsets)
+            else:
+                # 提交当前消费位置
+                await self.consumer.commit()
+            return True
+        except Exception as e:
+            logging.error(f"提交offset失败: {e}")
+            return False
+    
+    def get_consumer(self):
+        """获取底层的AIOKafkaConsumer实例（用于访问TopicPartition等）"""
+        return self.consumer
             
     async def stop(self):
         if self.consumer:

@@ -15,6 +15,7 @@ import json
 import logging
 import time
 import threading
+from collections import defaultdict
 
 # 使用相对导入避免循环依赖
 from .errors import (
@@ -27,7 +28,7 @@ from .kafka_client import (
     KafkaConsumerClient,
     AsyncKafkaConsumerClient,
 )
-from .config import KAFKA_CONFIG, TOPIC_TO_MODULES, MODULE_TO_TOPICS
+from .config import KAFKA_CONFIG, TOPIC_TO_MODULES, MODULE_TO_TOPICS, OFFSET_COMMIT_CONFIG
 from .dispatcher import DataDispatcher
 
 
@@ -41,6 +42,7 @@ class AsyncDataAnalysisService:
         kafka_config=None,
         data_expire_seconds=600,
         result_handler=None,
+        offset_commit_config=None,
     ):
         self.module_name = module_name
         if topics is not None:
@@ -61,6 +63,13 @@ class AsyncDataAnalysisService:
         self._stop_event = asyncio.Event()
         self._callback = None
         self._result_handler = result_handler
+        
+        # Offset管理相关
+        self.offset_config = offset_commit_config or OFFSET_COMMIT_CONFIG
+        self._pending_offsets = {}  # {TopicPartition: offset}
+        self._processed_count = 0   # 已处理消息计数
+        self._last_commit_time = time.time()  # 上次提交时间
+        self._commit_lock = asyncio.Lock()  # 提交锁，确保线程安全
 
     async def _maybe_await(self, func, *args):
         if func is None:
@@ -69,10 +78,191 @@ class AsyncDataAnalysisService:
         if asyncio.iscoroutine(result):
             return await result
         return result
+    
+    async def _commit_offsets_with_retry(self, offsets_to_commit=None):
+        """
+        带重试机制的offset提交
+        
+        Args:
+            offsets_to_commit: TopicPartition到OffsetAndMetadata的字典，为None时提交当前位置
+            
+        Returns:
+            bool: 提交是否成功
+        """
+        max_retries = self.offset_config.get('max_commit_retries', 3)
+        retry_delay = self.offset_config.get('commit_retry_delay', 1.0)
+        
+        for attempt in range(max_retries):
+            try:
+                success = await self.consumer.commit_offsets(offsets_to_commit)
+                if success:
+                    logging.info(f"成功提交offset: {len(offsets_to_commit) if offsets_to_commit else 'all'} 个分区")
+                    return True
+                else:
+                    logging.warning(f"提交offset失败，尝试 {attempt + 1}/{max_retries}")
+            except Exception as exc:
+                logging.error(f"提交offset异常，尝试 {attempt + 1}/{max_retries}: {exc}")
+            
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay)
+        
+        logging.error("达到最大重试次数，offset提交失败")
+        return False
+    
+    async def _should_commit_offsets(self):
+        """
+        判断是否应该提交offset
+        
+        Returns:
+            bool: 是否应该提交
+        """
+        commit_interval = self.offset_config.get('commit_interval_seconds', 5.0)
+        commit_batch_size = self.offset_config.get('commit_batch_size', 100)
+        
+        # 检查是否达到批次大小
+        if self._processed_count >= commit_batch_size:
+            return True
+        
+        # 检查是否达到时间间隔
+        if time.time() - self._last_commit_time >= commit_interval:
+            return True
+        
+        return False
+    
+    async def _process_and_track_message(self, msg):
+        """
+        处理单条消息并跟踪其offset
+        
+        职责：
+        1. 解码消息
+        2. 提取场站列表
+        3. 分发原始数据到各场站的dispatcher
+        
+        Args:
+            msg: Kafka消息对象
+            
+        Returns:
+            bool: 消息是否成功处理
+        """
+        topic = msg.topic
+        try:
+            value_str = msg.value.decode("utf-8")
+            value = json.loads(value_str)
+
+            # 提取场站列表和对应的数据
+            station_data_list = self._extract_station_data(topic, value)
+            
+            if not station_data_list:
+                logging.debug(f"消息中没有提取到场站数据: topic={topic}")
+                return False
+            
+            # 处理每个场站的数据
+            all_success = True
+            for station_id, station_data in station_data_list:
+                try:
+                    # 直接将原始数据交给dispatcher
+                    # parser会在dispatcher.get_module_input()时被调用
+                    self.dispatcher.update_topic_data(station_id, topic, station_data)
+                    
+                    # 创建或管理场站任务
+                    if station_id not in self._station_tasks:
+                        stop_flag = asyncio.Event()
+                        self._station_stop_flags[station_id] = stop_flag
+                        task = asyncio.create_task(
+                            self._station_worker(
+                                station_id,
+                                self._callback,
+                                self._result_handler,
+                                stop_flag,
+                            )
+                        )
+                        self._station_tasks[station_id] = task
+                    
+                except Exception as exc:
+                    handle_error(
+                        DispatcherError(exc),
+                        context=f"update_topic_data station_id={station_id}, topic={topic}",
+                    )
+                    all_success = False
+            
+            # 只有所有场站数据都处理成功才记录offset
+            if all_success and len(station_data_list) > 0:
+                tp_key = (msg.topic, msg.partition)
+                self._pending_offsets[tp_key] = msg.offset + 1
+                return True
+            
+            return False
+            
+        except Exception as exc:
+            handle_error(exc, context=f"处理消息 topic={topic}, partition={msg.partition}, offset={msg.offset}")
+            return False
+    
+    def _extract_station_data(self, topic, value):
+        """
+        从消息中提取场站数据列表
+        
+        职责：只负责识别消息格式并提取场站数据，不做任何解析
+        
+        Args:
+            topic: topic名称
+            value: 解析后的JSON数据（dict或list）
+            
+        Returns:
+            list: [(station_id, raw_data), ...] 场站ID和对应原始数据的列表
+        """
+        station_data_list = []
+        
+        try:
+            # 格式1：直接列表 [{'stationId': '...', ...}, ...]
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        station_id = item.get('stationId')
+                        if station_id:
+                            station_data_list.append((station_id, item))
+                return station_data_list
+            
+            # 格式2：字典格式
+            if not isinstance(value, dict):
+                return station_data_list
+            
+            # 格式2a：{'realTimeData': [{...}, ...]}
+            real_time_data = value.get('realTimeData')
+            if real_time_data and isinstance(real_time_data, list):
+                for item in real_time_data:
+                    if isinstance(item, dict):
+                        station_id = item.get('stationId')
+                        if station_id:
+                            station_data_list.append((station_id, item))
+                return station_data_list
+            
+            # 格式2b：单场站数据 {'stationId': '...', ...}
+            station_id = value.get('stationId')
+            if station_id:
+                station_data_list.append((station_id, value))
+                return station_data_list
+            
+            # 格式2c：全局数据（无stationId）
+            # 广播到所有已知场站
+            if not station_id:
+                known_stations = list(self._station_tasks.keys())
+                if known_stations:
+                    for sid in known_stations:
+                        station_data_list.append((sid, value))
+                else:
+                    # 如果还没有场站，存储到特殊的全局标识
+                    station_data_list.append(('__global__', value))
+                return station_data_list
+            
+        except Exception as exc:
+            handle_error(exc, context=f"提取场站数据 topic={topic}")
+        
+        return station_data_list
 
     async def _station_worker(self, station_id, callback, result_handler, stop_flag):
         while not stop_flag.is_set():
             try:
+                # 获取解析后的输入数据
                 inputs = self.dispatcher.get_all_inputs(station_id)
                 module_input = (
                     inputs.get(self.module_name) if self.module_name else inputs
@@ -80,6 +270,7 @@ class AsyncDataAnalysisService:
                 result = None
                 if callback:
                     try:
+                        # 调用业务回调（传给业务模块）
                         result = await self._maybe_await(
                             callback, station_id, module_input
                         )
@@ -113,51 +304,41 @@ class AsyncDataAnalysisService:
                     )
                     await asyncio.sleep(2)
                     continue
+                
                 if not batch:
+                    # 即使没有消息，也检查是否需要定时提交
+                    if self._pending_offsets and await self._should_commit_offsets():
+                        async with self._commit_lock:
+                            await self._commit_pending_offsets()
                     await asyncio.sleep(0.2)
                     continue
+                
+                # 处理批次中的每条消息
+                successful_count = 0
                 for msg in batch:
-                    topic = msg.topic
-                    value_str = msg.value.decode("utf-8") # New line to decode bytes to string
-                    value=json.loads(value_str) # New line to parse JSON string to dict
-                    
-                    if not isinstance(value, dict):
-                        handle_error(
-                            DataAnalysisError("Kafka消息value为None或非dict"),
-                            context=f"topic={topic}, value={value}",
-                        )
-                        continue
-                    station_id = (
-                        value.get("station_id")
-                        or value.get("host_id")
-                        or value.get("meter_id")
-                    )
-                    if not station_id:
-                        continue
-                    try:
-                        self.dispatcher.update_topic_data(station_id, topic, value)
-                    except Exception as exc:  # noqa: BLE001
-                        handle_error(
-                            DispatcherError(exc),
-                            context=f"update_topic_data station_id={station_id}, topic={topic}",
-                        )
-                    if station_id not in self._station_tasks:
-                        stop_flag = asyncio.Event()
-                        self._station_stop_flags[station_id] = stop_flag
-                        task = asyncio.create_task(
-                            self._station_worker(
-                                station_id,
-                                self._callback,
-                                self._result_handler,
-                                stop_flag,
-                            )
-                        )
-                        self._station_tasks[station_id] = task
+                    if await self._process_and_track_message(msg):
+                        successful_count += 1
+                
+                # 更新处理计数
+                self._processed_count += successful_count
+                
+                # 检查是否需要提交offset
+                if self._pending_offsets and await self._should_commit_offsets():
+                    async with self._commit_lock:
+                        await self._commit_pending_offsets()
+                
+                # 清理过期数据
                 try:
                     self.dispatcher.clean_expired()
                 except Exception as exc:  # noqa: BLE001
                     handle_error(DispatcherError(exc), context="clean_expired")
         finally:
+            # 停止前提交所有待处理的offset
+            if self._pending_offsets:
+                logging.info("服务停止，提交剩余offset...")
+                async with self._commit_lock:
+                    await self._commit_pending_offsets()
+            
             await self.consumer.stop()
             for flag in self._station_stop_flags.values():
                 flag.set()
@@ -165,6 +346,42 @@ class AsyncDataAnalysisService:
                 await asyncio.gather(
                     *self._station_tasks.values(), return_exceptions=True
                 )
+    
+    async def _commit_pending_offsets(self):
+        """
+        提交所有待处理的offset
+        """
+        if not self._pending_offsets:
+            return
+        
+        try:
+            # 构造aiokafka需要的offset字典
+            # aiokafka的commit需要TopicPartition对象
+            from aiokafka import TopicPartition, OffsetAndMetadata
+            
+            offsets_dict = {}
+            for (topic, partition), offset in self._pending_offsets.items():
+                tp = TopicPartition(topic, partition)
+                offsets_dict[tp] = OffsetAndMetadata(offset, "")
+            
+            # 提交offset
+            success = await self._commit_offsets_with_retry(offsets_dict)
+            
+            if success:
+                # 提交成功，清空待处理offset和计数器
+                committed_count = len(self._pending_offsets)
+                processed = self._processed_count
+                self._pending_offsets.clear()
+                self._processed_count = 0
+                self._last_commit_time = time.time()
+                logging.info(f"成功提交 {committed_count} 个分区的offset，共处理 {processed} 条消息")
+            else:
+                # 提交失败，保留待处理offset供下次重试
+                logging.warning(f"Offset提交失败，保留 {len(self._pending_offsets)} 个待处理offset")
+        
+        except Exception as exc:
+            logging.error(f"提交pending offsets时发生异常: {exc}")
+            # 异常时也保留offset供下次重试
 
     async def start(self, callback=None, result_handler=None):
         self._callback = callback or self._callback
@@ -256,9 +473,9 @@ class DataAnalysisService:
     def _station_worker(self, station_id, callback, result_handler, stop_event):
         while not stop_event.is_set():
             try:
-                outputs = self.dispatcher.get_all_inputs(station_id)
+                inputs = self.dispatcher.get_all_inputs(station_id)
                 module_input = (
-                    outputs.get(self.module_name) if self.module_name else outputs
+                    inputs.get(self.module_name) if self.module_name else inputs
                 )
                 result = None
                 if callback:
@@ -281,39 +498,47 @@ class DataAnalysisService:
                 try:
                     msg_pack = self.consumer.poll(timeout_ms=1000)
                 except Exception as exc:  # noqa: BLE001
-                    handle_error(exc, context="Kafka消费", recover=lambda: time.sleep(2))
+                    handle_error(
+                        exc, context="Kafka消费", recover=lambda: time.sleep(2)
+                    )
                     time.sleep(2)
                     continue
                 for tp, msgs in msg_pack.items():
                     topic = tp.topic
                     for msg in msgs:
                         value = msg.value
-                        if not isinstance(value, dict):
-                            handle_error(
-                                DataAnalysisError("Kafka消息value为None或非dict"),
-                                context=f"topic={topic}, value={value}",
-                            )
-                            continue
+                        
                         try:
-                            station_id = (
-                                value.get("station_id")
-                                or value.get("host_id")
-                                or value.get("meter_id")
-                            )
-                            if not station_id:
+                            # 提取场站列表和对应的数据
+                            station_data_list = self._extract_station_data_sync(topic, value)
+                            
+                            if not station_data_list:
+                                logging.debug(f"消息中没有提取到场站数据: topic={topic}")
                                 continue
-                            self.dispatcher.update_topic_data(station_id, topic, value)
-                            if station_id not in self._station_threads:
-                                stop_event = threading.Event()
-                                self._station_stop_events[station_id] = stop_event
-                                future = self._executor.submit(
-                                    self._station_worker,
-                                    station_id,
-                                    self._callback,
-                                    self._result_handler,
-                                    stop_event,
-                                )
-                                self._station_threads[station_id] = future
+                            
+                            # 处理每个场站的数据
+                            for station_id, station_data in station_data_list:
+                                try:
+                                    # 直接将原始数据交给dispatcher
+                                    self.dispatcher.update_topic_data(station_id, topic, station_data)
+                                    
+                                    # 创建或管理场站线程
+                                    if station_id not in self._station_threads:
+                                        stop_event = threading.Event()
+                                        self._station_stop_events[station_id] = stop_event
+                                        future = self._executor.submit(
+                                            self._station_worker,
+                                            station_id,
+                                            self._callback,
+                                            self._result_handler,
+                                            stop_event,
+                                        )
+                                        self._station_threads[station_id] = future
+                                except Exception as exc:
+                                    handle_error(
+                                        DispatcherError(exc),
+                                        context=f"update_topic_data station_id={station_id}, topic={topic}",
+                                    )
                         except Exception as exc:  # noqa: BLE001
                             handle_error(
                                 DispatcherError(exc), context=f"数据解析 topic={topic}"
@@ -336,6 +561,66 @@ class DataAnalysisService:
                 self.consumer.close()
             except Exception as exc:  # noqa: BLE001
                 handle_error(exc, context="KafkaConsumer关闭")
+    
+    def _extract_station_data_sync(self, topic, value):
+        """
+        从消息中提取场站数据列表（同步版本）
+        
+        Args:
+            topic: topic名称
+            value: 解析后的JSON数据（dict或list）
+            
+        Returns:
+            list: [(station_id, raw_data), ...] 场站ID和对应原始数据的列表
+        """
+        station_data_list = []
+        
+        try:
+            # 格式1：直接列表 [{'stationId': '...', ...}, ...]
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, dict):
+                        station_id = item.get('stationId')
+                        if station_id:
+                            station_data_list.append((station_id, item))
+                return station_data_list
+            
+            # 格式2：字典格式
+            if not isinstance(value, dict):
+                return station_data_list
+            
+            # 格式2a：{'realTimeData': [{...}, ...]}
+            real_time_data = value.get('realTimeData')
+            if real_time_data and isinstance(real_time_data, list):
+                for item in real_time_data:
+                    if isinstance(item, dict):
+                        station_id = item.get('stationId')
+                        if station_id:
+                            station_data_list.append((station_id, item))
+                return station_data_list
+            
+            # 格式2b：单场站数据 {'stationId': '...', ...}
+            station_id = value.get('stationId')
+            if station_id:
+                station_data_list.append((station_id, value))
+                return station_data_list
+            
+            # 格式2c：全局数据（无stationId）
+            # 广播到所有已知场站
+            if not station_id:
+                known_stations = list(self._station_threads.keys())
+                if known_stations:
+                    for sid in known_stations:
+                        station_data_list.append((sid, value))
+                else:
+                    # 如果还没有场站，存储到特殊的全局标识
+                    station_data_list.append(('__global__', value))
+                return station_data_list
+            
+        except Exception as exc:
+            handle_error(exc, context=f"提取场站数据 topic={topic}")
+        
+        return station_data_list
 
     def start(self, callback=None, result_handler=None, background=True):
         self._callback = callback or self._callback
