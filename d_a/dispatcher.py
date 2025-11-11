@@ -40,7 +40,8 @@ TOPIC_PARSER_MAP = {
     "SCHEDULE-CAR-ORDER": CarOrderParser(),
     "SCHEDULE-CAR-PRICE": CarPriceParser(),
     "SCHEDULE-DEVICE-ERROR": DeviceErrorParser(),
-    "SCHEDULE-DEVICE-HOST": DeviceHostParser(),
+    "SCHEDULE-DEVICE-HOST-DCDC": DeviceHostDCDCParser(),
+    "SCHEDULE-DEVICE-HOST-ACDC": DeviceHostACDCParser(),
     "SCHEDULE-DEVICE-STORAGE": DeviceStorageParser(),
 }
 
@@ -160,14 +161,23 @@ class DataDispatcher:
     def get_module_input(self, station_id, module):
         """
         整合该场站所有topic窗口数据，组装为模块输入（在这里完成解析）。
-        将窗口内的时序数据拼接成列表形式。
+        
+        说明：
+        - 对于事件驱动模式，当最快频率topic更新时触发处理
+        - 慢速topic自动使用其最新缓存数据（不管数据新旧）
+        - 只需确保topic有数据即可，不检查数据新鲜度
         
         Args:
             station_id (str): 场站ID
             module (str): 模块名称
             
         Returns:
-            dict: 模块输入数据，格式由各topic parser的parse_window方法决定
+            dict: 模块输入数据，包含：
+                - 业务字段：由各topic parser解析生成
+                - _data_quality: 数据可用性信息
+                    - available_topics: 有数据的topic列表
+                    - missing_topics: 无数据的topic列表
+                    - availability_ratio: 数据可用率 (0.0-1.0)
         """
         try:
             # 使用线程锁确保线程安全
@@ -179,12 +189,26 @@ class DataDispatcher:
                 # 初始化输入数据字典，包含场站ID
                 input_data = {'stationId': station_id}
                 
+                # 数据可用性元信息（简化版：只关注是否有数据）
+                data_quality = {
+                    'available_topics': [],     # 有数据的topic
+                    'missing_topics': [],       # 无数据的topic
+                    'total_topics': 0,
+                    'availability_ratio': 0.0   # 数据可用率
+                }
+                
                 # 处理模块所需的topic数据
-                for topic in MODULE_TO_TOPICS.get(module, []):
+                required_topics = MODULE_TO_TOPICS.get(module, [])
+                data_quality['total_topics'] = len(required_topics)
+                
+                for topic in required_topics:
                     # 获取指定topic的窗口数据
                     window = self.get_topic_window(station_id, topic)
                     
                     if window:
+                        # 有数据即可（不管是最新的还是缓存的）
+                        data_quality['available_topics'].append(topic)
+                        
                         # 调用topic parser的parse_window方法
                         # 各topic parser可以实现自己的窗口数据处理逻辑
                         parser = TOPIC_PARSER_MAP.get(topic)
@@ -201,7 +225,10 @@ class DataDispatcher:
                                     context=f"解析窗口数据 topic={topic}, station_id={station_id}",
                                 )
                     else:
-                        # 窗口为空，添加空列表
+                        # 窗口为空，没有任何数据
+                        data_quality['missing_topics'].append(topic)
+                        
+                        # 添加空列表
                         fields = TOPIC_DETAIL.get(topic, {}).get("fields", [])
                         for field in fields:
                             input_data[field] = []
@@ -237,6 +264,16 @@ class DataDispatcher:
                         continue
                     
                     input_data[f"{dep}_output"] = parsed_values
+                
+                # 计算数据可用率
+                available_count = len(data_quality['available_topics'])
+                total_count = data_quality['total_topics']
+                data_quality['availability_ratio'] = (
+                    available_count / total_count if total_count > 0 else 0.0
+                )
+                
+                # 将数据可用性信息添加到返回结果（业务模块可根据此信息决定是否处理）
+                input_data['_data_quality'] = data_quality
                 
                 # 调用模块解析器（如果需要进一步处理）
                 try:

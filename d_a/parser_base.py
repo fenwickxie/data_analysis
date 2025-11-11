@@ -9,6 +9,8 @@ filename: parser_base.py
 version: 1.0
 """
 
+from typing import cast
+
 # 解析器基类
 from abc import ABC, abstractmethod
 
@@ -45,11 +47,15 @@ class ParserBase(ABC):
         for raw_data in window_data:
             parsed = self.parse(raw_data)
             
-            if parsed:
-                for key, value in parsed.items():
-                    if key not in result:
-                        result[key] = []
-                    result[key].append(value)
+            # 类型检查：确保parsed是字典类型
+            if not parsed:
+                continue
+            
+            # 使用cast明确类型
+            for key, value in cast(dict, parsed).items():
+                if key not in result:
+                    result[key] = []
+                result[key].append(value)
         
         return result
 
@@ -102,3 +108,26 @@ class ConfigBasedParser(ParserBase):
             parsed_data[field] = raw_data.get(field)
         
         return parsed_data
+    
+    def parse_window(self, window_data):
+        """
+        ConfigBasedParser 的窗口解析实现
+        
+        对于大多数配置型数据（window_size=1），只需要最新的数据
+        对于时序型数据（window_size>1），使用基类的默认实现
+        
+        Args:
+            window_data: 窗口内的原始数据列表
+            
+        Returns:
+            dict: 解析后的数据
+        """
+        if not window_data:
+            return {}
+        
+        # 如果窗口大小为1，直接返回最新数据的解析结果
+        if len(window_data) == 1:
+            return self.parse(window_data[0]) or {}
+        
+        # 窗口大小>1时，使用基类的默认实现（合并为列表）
+        return super().parse_window(window_data)

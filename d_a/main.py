@@ -39,6 +39,12 @@ version: 1.0
 
 
 # ===================== 异步示例 =====================
+# 
+# 性能优化说明：
+# - 指定 MODULE_NAME 后，服务会自动只订阅该模块需要的 topics
+# - 避免订阅和处理无关的 topics，节省网络、CPU、内存资源
+# - 例如：load_prediction 只订阅约 3-5 个相关 topics，而非全部 11 个
+#
 from __future__ import annotations
 
 import asyncio
@@ -102,9 +108,9 @@ async def main():
         payload = {
             "station_id": station_id,
             "module": MODULE_NAME,
-            "result": result,
             "timestamp": time.time(),
         }
+        payload.update(result)
         try:
             await producer.send(output_topic, payload)
         except Exception as exc:  # noqa: BLE001

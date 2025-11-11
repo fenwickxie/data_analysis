@@ -17,7 +17,7 @@ from .device_gun import DeviceGunParser
 from .car_order import CarOrderParser
 from .car_price import CarPriceParser
 from .device_error import DeviceErrorParser
-from .device_host import DeviceHostParser
+from .device_host import DeviceHostDCDCParser,DeviceHostACDCParser
 from .device_storage import DeviceStorageParser
 from .model_output import ModelOutputParser
 
@@ -30,7 +30,8 @@ __all__ = [
     'CarOrderParser',
     'CarPriceParser',
     'DeviceErrorParser',
-    'DeviceHostParser',
+    'DeviceHostDCDCParser',
+    'DeviceHostACDCParser',
     'DeviceStorageParser',
     'ModelOutputParser',
 ]

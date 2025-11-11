@@ -15,7 +15,7 @@ version: 1.0
 KAFKA_CONFIG = {
     'bootstrap_servers': ['10.8.4.40:35888'],
     'consumer': {
-        'group_id': 'stack-charge-tcp-command',
+        'group_id': 'stack-charge-tcp-command-xfy',
         'auto_offset_reset': 'latest',
         'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
@@ -45,7 +45,7 @@ OFFSET_COMMIT_CONFIG = {
 # topic详细配置
 TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {
-        'fields': ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId','powerNum','normaClap', 'totalPower', 'hostCode'],
+        'fields': ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId','powerNum','normaClap', 'hostCode'],
         'frequency': '新建站或配置更改时',
         'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
         'window_size': 1
@@ -54,7 +54,7 @@ TOPIC_DETAIL = {
         'fields': ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg'],
         'frequency': '1小时1次，推送7天',
         'modules': ['load_prediction', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
-        'window_size': 7*24
+        'window_size': 1
     },
     'SCHEDULE-ENVIRONMENT-CALENDAR': {
         'fields': ['dayOfWeek', 'holiday'],
@@ -66,13 +66,13 @@ TOPIC_DETAIL = {
         'fields': ['meterId', 'meterPower', 'rmeterLimitPower'],
         'frequency': '5分钟1次',
         'modules': ['electricity_price'],
-        'window_size': 7*24*12
+        'window_size': 1
     },
     'SCHEDULE-DEVICE-GUN': {
         'fields': ['hostCode', 'gunNo', 'status'],
         'frequency': '15秒1次',
         'modules': [],
-        'window_size': 7*24*60*4
+        'window_size': 1
     },
     'SCHEDULE-CAR-ORDER': {
         'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
@@ -84,13 +84,13 @@ TOPIC_DETAIL = {
         'fields': ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee'],
         'frequency': '1月1次',
         'modules': ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management'],
-        'window_size': 30
+        'window_size': 1
     },
     'SCHEDULE-DEVICE-ERROR': {
         'fields': ['stationId', 'hostError', 'acError', 'dcError', 'terminalError', 'storageError'],
         'frequency': '触发推送',
         'modules': ['SOH_model'],
-        'window_size': 10
+        'window_size': 1
     },
     'SCHEDULE-DEVICE-HOST-DCDC': {
         'fields': ['hostCode', 'dcWorkStatus', 'dcPower'],
@@ -108,7 +108,7 @@ TOPIC_DETAIL = {
         'fields': ['hostId', 'storageId', 'storagePower', 'storageCurrent', 'storageTempMax', 'storageTempMin', 'storageSOC', 'storageSOH'],
         'frequency': '15秒1次',
         'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization'],
-        'window_size': 7*24*60*4
+        'window_size': 1
     },
 }
 
