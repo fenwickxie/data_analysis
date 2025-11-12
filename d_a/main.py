@@ -71,7 +71,7 @@ else:
 
 async def my_model_predict(module_input):
     # 这里写模型推理逻辑
-    await asyncio.sleep(0.01)  # 模拟异步推理
+    print(module_input)
     return {"result": 123}
 
 

@@ -86,13 +86,19 @@ class ServiceBase:
         3. 单场站字典: {'stationId': '...', ...}
         4. 全局数据: {'calendar': [...]} 等无stationId的字典
         
+        特殊处理：
+        - 对于包含窗口数据的topic（realTimeData、fee），需要按场站分组
+        - 返回格式：[(station_id, [data1, data2, ...]), ...]
+        
         Args:
             topic: topic名称
             value: 解析后的JSON数据（dict或list）
             
         Returns:
             list: [(station_id, raw_data), ...] 场站ID和对应原始数据的列表
-                  全局数据返回 [('__global__', raw_data)]
+                  - 对于窗口数据：raw_data 是按 sendTime 排序的列表
+                  - 对于单条数据：raw_data 是单个字典
+                  - 全局数据返回 [('__global__', raw_data)]
         """
         station_data_list = []
         
@@ -113,16 +119,31 @@ class ServiceBase:
             
             # 格式2a：包含场站列表的字典 {'realTimeData': [...]} 或 {'fee': [...]}
             # 示例：SCHEDULE-STATION-REALTIME-DATA, SCHEDULE-CAR-PRICE
-            # 已知的包含场站列表的键名
+            # 这些数据需要按场站分组，因为一个消息包含多个场站的多个时间点数据
             list_keys = ['realTimeData', 'fee']
             for key in list_keys:
                 data_list = value.get(key)
                 if data_list and isinstance(data_list, list):
+                    # 按场站分组
+                    from collections import defaultdict
+                    station_groups = defaultdict(list)
+                    
                     for item in data_list:
                         if isinstance(item, dict):
                             station_id = item.get('stationId')
                             if station_id:
-                                station_data_list.append((station_id, item))
+                                station_groups[station_id].append(item)
+                    
+                    # 对每个场站的数据按 sendTime 排序
+                    for station_id, items in station_groups.items():
+                        # 按 sendTime 排序（如果存在）
+                        sorted_items = sorted(
+                            items,
+                            key=lambda x: x.get('sendTime', '')
+                        )
+                        # 返回整个窗口数据列表
+                        station_data_list.append((station_id, sorted_items))
+                    
                     return station_data_list
             
             # 格式2b：单场站数据 {'stationId': '...', ...}

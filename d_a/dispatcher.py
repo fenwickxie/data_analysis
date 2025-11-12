@@ -127,10 +127,14 @@ class DataDispatcher:
         将新数据添加到对应场站和topic的数据窗口中，如果窗口已满，
         会自动移除最旧的数据。此方法线程安全，可在多线程环境下使用。
         
+        支持两种更新模式：
+        1. 单条数据：raw_data 是 dict，追加到窗口
+        2. 窗口数据：raw_data 是 list，替换整个窗口
+        
         Args:
             station_id (str): 场站ID
             topic (str): topic名称
-            raw_data (dict): 原始数据
+            raw_data (dict or list): 原始数据（单条dict或窗口数据list）
             
         Raises:
             DispatcherError: 当数据更新失败时抛出
@@ -142,7 +146,17 @@ class DataDispatcher:
                 if topic not in self.data_cache[station_id]:
                     win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
                     self.data_cache[station_id][topic] = deque(maxlen=win_size)
-                self.data_cache[station_id][topic].append((raw_data, time.time()))
+                
+                # 判断是单条数据还是窗口数据
+                if isinstance(raw_data, list):
+                    # 窗口数据：替换整个窗口（已按时间排序）
+                    self.data_cache[station_id][topic].clear()
+                    current_time = time.time()
+                    for item in raw_data:
+                        self.data_cache[station_id][topic].append((item, current_time))
+                else:
+                    # 单条数据：追加到窗口
+                    self.data_cache[station_id][topic].append((raw_data, time.time()))
         except Exception as e:
             handle_error(
                 DispatcherError(e),
@@ -231,7 +245,8 @@ class DataDispatcher:
                         # 添加空列表
                         fields = TOPIC_DETAIL.get(topic, {}).get("fields", [])
                         for field in fields:
-                            input_data[field] = []
+                            if field is not 'stationId':
+                                input_data[field] = []
                         input_data['sendTime'] = []
                 
                 # 依赖其他模块输出（通过Kafka topic获取）

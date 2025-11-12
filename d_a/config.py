@@ -20,7 +20,7 @@ KAFKA_CONFIG = {
         'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'max_poll_records': 3000,
-        'enable_auto_commit': False,
+        'enable_auto_commit': True,
     },
     'listener': {
         'ack-mode': 'manual',
@@ -45,7 +45,7 @@ OFFSET_COMMIT_CONFIG = {
 # topic详细配置
 TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {
-        'fields': ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId','powerNum','normaClap', 'hostCode'],
+        'fields': ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId','powerNum','normalClap', 'hostCode'],
         'frequency': '新建站或配置更改时',
         'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
         'window_size': 1
@@ -54,7 +54,7 @@ TOPIC_DETAIL = {
         'fields': ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg'],
         'frequency': '1小时1次，推送7天',
         'modules': ['load_prediction', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
-        'window_size': 1
+        'window_size': 24*7
     },
     'SCHEDULE-ENVIRONMENT-CALENDAR': {
         'fields': ['dayOfWeek', 'holiday'],
