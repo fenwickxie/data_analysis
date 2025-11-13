@@ -20,7 +20,7 @@ KAFKA_CONFIG = {
         'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'max_poll_records': 3000,
-        'enable_auto_commit': True,
+        'enable_auto_commit': False,
     },
     'listener': {
         'ack-mode': 'manual',
@@ -78,7 +78,7 @@ TOPIC_DETAIL = {
         'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
         'frequency': '1秒1次',
         'modules': ['operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
-        'window_size': 7*24*60*60
+        'window_size': 1
     },
     'SCHEDULE-CAR-PRICE': {
         'fields': ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee'],
@@ -117,7 +117,7 @@ MODULE_DEPENDENCIES = {
     'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
     'station_guidance': ['load_prediction', 'evaluation_model'],
     'thermal_management': ['load_prediction', 'operation_optimization'],
-    'operation_optimization': ['load_prediction'],
+    'operation_optimization': ['pv_prediction'],
     # 其他模块依赖可扩展
 }
 

@@ -104,6 +104,7 @@ class DataDispatcher:
             data_expire_seconds (int, optional): 数据过期时间(秒)，默认为600。
                 超过此时间未更新的场站数据将被自动清理。
         """
+        # 初始化解析器映射
         self.parsers = {
             "electricity_price": ElectricityPriceParser(),
             "load_prediction": LoadPredictionParser(),
@@ -119,52 +120,164 @@ class DataDispatcher:
         self.data_cache = {}
         self.data_expire_seconds = data_expire_seconds
         self.lock = threading.RLock()
+        
+        # Topic更新策略映射
+        # 订单类topic：需要按秒聚合
+        self._order_topics = {'SCHEDULE-CAR-ORDER'}
+        # 窗口类topic：批量替换（raw_data是list）
+        self._window_topics = {'SCHEDULE-STATION-REALTIME-DATA'}
+        # 其他topic使用默认的单条追加策略
 
-    def update_topic_data(self, station_id, topic, raw_data):
+    def _update_order_topic(self, station_id, topic, raw_data, timestamp):
         """
-        更新指定场站、topic的数据窗口。
+        更新订单类 topic（如 SCHEDULE-CAR-ORDER）
         
-        将新数据添加到对应场站和topic的数据窗口中，如果窗口已满，
-        会自动移除最旧的数据。此方法线程安全，可在多线程环境下使用。
+        订单特点：
+        - window_size=1，只保留最新一秒的数据
+        - 同一秒可能有多个订单（不同枪号）
+        - 需要聚合同一秒的所有订单
         
-        支持两种更新模式：
-        1. 单条数据：raw_data 是 dict，追加到窗口
-        2. 窗口数据：raw_data 是 list，替换整个窗口
+        Args:
+            station_id (str): 场站ID
+            topic (str): topic名称
+            raw_data (dict): 单条订单数据
+            timestamp (float): Kafka消息时间戳（秒）
+            
+        Returns:
+            bool: 是否应该触发数据就绪事件
+                  - True: 时间戳变化，进入新的一秒，上一秒的订单已聚合完成
+                  - False: 同一秒内聚合中，不应触发事件
+        """
+        should_trigger = False
+        
+        if self.data_cache[station_id][topic]:
+            # 检查最后一条数据的时间戳（秒级）
+            last_data, last_ts = self.data_cache[station_id][topic][-1]
+            
+            # 如果时间戳相同（秒级），聚合数据
+            if int(last_ts) == int(timestamp):
+                # 将 last_data 转换为列表（如果还不是）
+                if not isinstance(last_data, list):
+                    last_data = [last_data]
+                
+                # 添加新订单
+                last_data.append(raw_data)
+                
+                # 更新最后一条记录
+                self.data_cache[station_id][topic][-1] = (last_data, timestamp)
+                
+                # 同一秒内聚合，不触发事件
+                should_trigger = False
+            else:
+                # 时间戳不同，说明进入新的一秒
+                # 添加新记录（包装为列表）
+                self.data_cache[station_id][topic].append(([raw_data], timestamp))
+                
+                # 上一秒的订单已聚合完成，应该触发事件处理上一秒的数据
+                should_trigger = True
+        else:
+            # 窗口为空，初始化（包装为列表）
+            self.data_cache[station_id][topic].append(([raw_data], timestamp))
+            
+            # 第一条订单，触发事件（可能是唯一的订单）
+            should_trigger = True
+        
+        return should_trigger
+    
+    def _update_window_topic(self, station_id, topic, raw_data, timestamp):
+        """
+        更新窗口类 topic（如 SCHEDULE-STATION-REALTIME-DATA）
+        
+        窗口特点：
+        - window_size > 1，保留多条历史数据
+        - raw_data 是列表，包含多条记录（已按时间排序）
+        - 直接替换整个窗口
+        
+        Args:
+            station_id (str): 场站ID
+            topic (str): topic名称
+            raw_data (list): 窗口数据列表
+            timestamp (float): Kafka消息时间戳（秒）
+        """
+        # 替换整个窗口（已按时间排序）
+        self.data_cache[station_id][topic].clear()
+        for item in raw_data:
+            self.data_cache[station_id][topic].append((item, timestamp))
+    
+    def _update_single_topic(self, station_id, topic, raw_data, timestamp):
+        """
+        更新单条类 topic（如 SCHEDULE-STATION-PARAM, SCHEDULE-CAR-PRICE）
+        
+        单条特点：
+        - window_size=1，只保留最新数据
+        - raw_data 是单个 dict
+        - 直接追加（deque 自动处理溢出）
+        
+        Args:
+            station_id (str): 场站ID
+            topic (str): topic名称
+            raw_data (dict): 单条数据
+            timestamp (float): Kafka消息时间戳（秒）
+        """
+        self.data_cache[station_id][topic].append((raw_data, timestamp))
+    
+    def update_topic_data(self, station_id, topic, raw_data, timestamp=None):
+        """
+        更新指定场站、topic的数据窗口到缓存中。
+        
+        根据 topic 类型选择对应的更新策略：
+        1. 订单类（SCHEDULE-CAR-ORDER）：同一秒聚合多个订单
+        2. 窗口类（SCHEDULE-STATION-REALTIME-DATA）：批量替换窗口数据
+        3. 单条类（其他 topic，如 SCHEDULE-STATION-PARAM, SCHEDULE-CAR-PRICE）：直接追加最新数据
         
         Args:
             station_id (str): 场站ID
             topic (str): topic名称
             raw_data (dict or list): 原始数据（单条dict或窗口数据list）
+            timestamp (float, optional): Kafka消息时间戳（秒），默认使用当前时间
             
+        Returns:
+            bool: 是否应该触发数据就绪事件
+                  - True: 数据已完整，可以触发事件通知业务模块
+                  - False: 数据聚合中（如订单类同一秒内聚合），暂不触发
         Raises:
             DispatcherError: 当数据更新失败时抛出
         """
         try:
             with self.lock:
+                # 初始化场站和topic缓存
                 if station_id not in self.data_cache:
                     self.data_cache[station_id] = {}
                 if topic not in self.data_cache[station_id]:
                     win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
                     self.data_cache[station_id][topic] = deque(maxlen=win_size)
                 
-                # 判断是单条数据还是窗口数据
-                if isinstance(raw_data, list):
-                    # 窗口数据：替换整个窗口（已按时间排序）
-                    self.data_cache[station_id][topic].clear()
-                    current_time = time.time()
-                    for item in raw_data:
-                        self.data_cache[station_id][topic].append((item, current_time))
+                # 使用Kafka时间戳或当前时间
+                ts = timestamp if timestamp is not None else time.time()
+                
+                # 根据 topic 类型选择更新策略
+                if topic in self._order_topics:
+                    # 订单类：聚合同一秒的订单，返回是否应该触发
+                    should_trigger = self._update_order_topic(station_id, topic, raw_data, ts)
+                    return should_trigger
+                elif topic in self._window_topics:
+                    # 窗口类：批量替换（raw_data 必须是列表）
+                    self._update_window_topic(station_id, topic, raw_data, ts)
+                    return True  # 窗口数据完整，可以触发
                 else:
-                    # 单条数据：追加到窗口
-                    self.data_cache[station_id][topic].append((raw_data, time.time()))
+                    # 单条类：直接追加
+                    self._update_single_topic(station_id, topic, raw_data, ts)
+                    return True  # 单条数据完整，可以触发
+                
         except Exception as e:
             handle_error(
                 DispatcherError(e),
                 context=f"窗口数据更新 station_id={station_id}, topic={topic}",
             )
+            return False  # 更新失败，不触发
 
     def get_topic_window(self, station_id, topic):
-        # 获取窗口数据（只返回data部分，按时间升序）
+        # 获取窗口数据（只返回data部分）
         if (
             station_id not in self.data_cache
             or topic not in self.data_cache[station_id]
@@ -203,7 +316,7 @@ class DataDispatcher:
                 # 初始化输入数据字典，包含场站ID
                 input_data = {'stationId': station_id}
                 
-                # 数据可用性元信息（简化版：只关注是否有数据）
+                # 数据可用性元信息（只关注是否有数据）
                 data_quality = {
                     'available_topics': [],     # 有数据的topic
                     'missing_topics': [],       # 无数据的topic

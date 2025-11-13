@@ -14,77 +14,80 @@ class CarPriceParser(ParserBase):
     
     def parse(self, raw_data):
         """
-        解析价格数据
+        解析价格数据，将 feeNo1-feeNo48 合并为 feeNo 列表
         
         Args:
-            raw_data: {
-                'fee': [
-                    {
-                        'stationId': '1077316458003959808',
-                        'hostCode': '52000000000088',
-                        'peakElectricFee': 0.8,
-                        'peakServerFee': 0.6,
-                        'flatElectricFee': 0.7,
-                        'flatServerFee': 0.4,
-                        'sharpElectricFee': 0.5,
-                        'sharpServerFee': 0.2,
-                        'ebbElectricFee': 0.6,
-                        'ebbServerFee': 0.3,
-                        'sendTime': '2025-10-21 18:58:13',
-                        ...
-                    }
-                ]
+            raw_data: 单条价格数据或包含 fee 列表的字典
+            {
+                'stationId': '1077316458003959808',
+                'hostCode': '52000000000088',
+                'peakElectricFee': 0.8,
+                'peakServerFee': 0.6,
+                'flatElectricFee': 0.7,
+                'flatServerFee': 0.4,
+                'sharpElectricFee': 0.5,
+                'sharpServerFee': 0.2,
+                'ebbElectricFee': 0.6,
+                'ebbServerFee': 0.3,
+                'otherElectricFee': 0.0,
+                'otherServerFee': 0.0,
+                'feeNo1': '00', 'feeNo2': '00', ..., 'feeNo48': '02',
+                'sendTime': '2025-10-21 18:58:13',
+                'dialNo': '2100',
+                'lossRate': 1,
+                ...
             }
             
+            feeNo 值含义：'00'=尖, '01'=峰, '02'=平, '03'=谷, '04'=其它
+            
         Returns:
-            dict: 转换为列表格式
+            dict: 合并 feeNo 后的数据
+            {
+                'stationId': '...',
+                'feeNo': ['00', '00', ..., '02'],  # 48个时段的费率类型
+                'peakElectricFee': 0.8,
+                ...
+            }
         """
         if not raw_data:
             return None
         
-        # 提取 fee 数组
-        fee_list = raw_data.get('fee', [])
-        if not fee_list:
-            return None
-        
-        # 转换为列表格式（时序数据）
+        # 复制数据（避免修改原始数据）
         parsed_data = {}
         
-        # 关键字段列表
-        key_fields = [
-            'peakElectricFee', 'peakServerFee',
-            'flatElectricFee', 'flatServerFee', 
-            'sharpElectricFee', 'sharpServerFee',
-            'ebbElectricFee', 'ebbServerFee',
-            'otherElectricFee', 'otherServerFee',
-            'sendTime', 'hostCode'
-        ]
+        # 提取 feeNo1-feeNo48 并合并为 feeNo 列表
+        fee_numbers = []
+        for i in range(1, 49):  # feeNo1 到 feeNo48（48个半小时时段）
+            fee_no_key = f'feeNo{i}'
+            if fee_no_key in raw_data:
+                fee_numbers.append(raw_data[fee_no_key])
         
-        for field in key_fields:
-            parsed_data[field] = []
-            for item in fee_list:
-                parsed_data[field].append(item.get(field))
+        if fee_numbers:
+            parsed_data['feeNo'] = fee_numbers
         
-        # 时段费率编号（feeNo1-feeNo48，对应48个时段）
-        # 提取第一个费率方案作为代表（通常同一批次的费率方案相同）
-        if fee_list:
-            first_fee = fee_list[0]
-            fee_numbers = []
-            for i in range(1, 49):  # feeNo1 到 feeNo48
-                fee_no_key = f'feeNo{i}'
-                if fee_no_key in first_fee:
-                    fee_numbers.append(first_fee[fee_no_key])
-            if fee_numbers:
-                parsed_data['feeNumbers'] = fee_numbers
+        # 复制其他字段（排除 feeNo1-feeNo48）
+        excluded_keys = {f'feeNo{i}' for i in range(1, 49)}
+        for key, value in raw_data.items():
+            if key not in excluded_keys:
+                parsed_data[key] = value
         
         return parsed_data if parsed_data else None
     
     def parse_window(self, window_data):
         """
-        解析窗口数据，通常价格数据使用最新的一条
+        解析窗口数据
+        
+        由于 SCHEDULE-CAR-PRICE 的 window_size=1，且一个消息包含完整的价格信息，
+        所以直接解析最新的一条数据即可
+        
+        Args:
+            window_data: 窗口数据列表，每个元素是一条价格数据
+            
+        Returns:
+            dict: 解析后的价格数据（feeNo1-feeNo48 已合并为 feeNo 列表）
         """
         if not window_data:
             return {}
         
-        # 使用最新的价格数据
+        # 使用最新的价格数据（已经是单条数据，不是包含 'fee' 键的字典）
         return self.parse(window_data[-1])

@@ -193,67 +193,81 @@ class StationRealtimeDataParser(ConfigBasedParser):
     
     def _interpolate_value(self, parsed_list, current_idx, gun_no, field, all_gun_nos):
         """
-        对缺失的枪号数据进行插值
+        对缺失的枪号数据进行填充
         
-        策略：
-        1. 优先使用线性插值（如果前后都有数据）
-        2. 其次使用前向填充或后向填充
-        3. 最后使用0填充
+        填充策略：
+        - 直接填充 0（简单清晰，避免插值引入误差）
+        
+        如需其他填充策略（如前向填充、线性插值等），可修改此方法。
         
         Args:
             parsed_list: 所有时间点的数据列表
             current_idx: 当前时间点的索引
-            gun_no: 需要插值的枪号
+            gun_no: 需要填充的枪号
             field: 字段名（如'outputPowerPerGunAvg'）
             all_gun_nos: 所有枪号列表
         
         Returns:
-            插值结果（浮点数）
+            填充值（浮点数）
         """
-        prev_value = None
-        next_value = None
-        prev_distance = 0
-        next_distance = 0
+        # 直接填充 0
+        return 0.0
         
-        # 向前查找
-        for i in range(current_idx - 1, -1, -1):
-            item = parsed_list[i]
-            if item['parsed'] and 'gunNo' in item['parsed']:
-                gun_nos = item['parsed']['gunNo']
-                if gun_no in gun_nos:
-                    idx = gun_nos.index(gun_no)
-                    values = item['parsed'].get(field, [])
-                    if idx < len(values):
-                        prev_value = values[idx]
-                        prev_distance = current_idx - i
-                        break
+        # === 可选的其他填充策略（已注释） ===
         
-        # 向后查找
-        for i in range(current_idx + 1, len(parsed_list)):
-            item = parsed_list[i]
-            if item['parsed'] and 'gunNo' in item['parsed']:
-                gun_nos = item['parsed']['gunNo']
-                if gun_no in gun_nos:
-                    idx = gun_nos.index(gun_no)
-                    values = item['parsed'].get(field, [])
-                    if idx < len(values):
-                        next_value = values[idx]
-                        next_distance = i - current_idx
-                        break
+        # 策略1：前向填充（使用最近的历史值）
+        # for i in range(current_idx - 1, -1, -1):
+        #     item = parsed_list[i]
+        #     if item['parsed'] and 'gunNo' in item['parsed']:
+        #         gun_nos = item['parsed']['gunNo']
+        #         if gun_no in gun_nos:
+        #             idx = gun_nos.index(gun_no)
+        #             values = item['parsed'].get(field, [])
+        #             if idx < len(values):
+        #                 return values[idx]
+        # return 0.0
         
-        # 根据找到的值进行插值
-        if prev_value is not None and next_value is not None:
-            # 线性插值
-            total_distance = prev_distance + next_distance
-            weight = prev_distance / total_distance
-            return prev_value * (1 - weight) + next_value * weight
-        elif prev_value is not None:
-            # 前向填充
-            return prev_value
-        elif next_value is not None:
-            # 后向填充
-            return next_value
-        else:
-            # 0填充
-            return 0.0
+        # 策略2：线性插值（使用前后值进行插值）
+        # prev_value = None
+        # next_value = None
+        # prev_distance = 0
+        # next_distance = 0
+        # 
+        # # 向前查找
+        # for i in range(current_idx - 1, -1, -1):
+        #     item = parsed_list[i]
+        #     if item['parsed'] and 'gunNo' in item['parsed']:
+        #         gun_nos = item['parsed']['gunNo']
+        #         if gun_no in gun_nos:
+        #             idx = gun_nos.index(gun_no)
+        #             values = item['parsed'].get(field, [])
+        #             if idx < len(values):
+        #                 prev_value = values[idx]
+        #                 prev_distance = current_idx - i
+        #                 break
+        # 
+        # # 向后查找
+        # for i in range(current_idx + 1, len(parsed_list)):
+        #     item = parsed_list[i]
+        #     if item['parsed'] and 'gunNo' in item['parsed']:
+        #         gun_nos = item['parsed']['gunNo']
+        #         if gun_no in gun_nos:
+        #             idx = gun_nos.index(gun_no)
+        #             values = item['parsed'].get(field, [])
+        #             if idx < len(values):
+        #                 next_value = values[idx]
+        #                 next_distance = i - current_idx
+        #                 break
+        # 
+        # # 线性插值
+        # if prev_value is not None and next_value is not None:
+        #     total_distance = prev_distance + next_distance
+        #     weight = prev_distance / total_distance
+        #     return prev_value * (1 - weight) + next_value * weight
+        # elif prev_value is not None:
+        #     return prev_value
+        # elif next_value is not None:
+        #     return next_value
+        # 
+        # return 0.0
 

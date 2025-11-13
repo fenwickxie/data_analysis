@@ -39,6 +39,31 @@ class ServiceBase:
             )
         else:
             logging.info(f"订阅 {len(self.topics)} 个 topics")
+        
+        # Topic数据提取策略映射
+        # 列表格式topic：直接列表 [{'stationId': ...}, ...]
+        self._list_format_topics = {'SCHEDULE-STATION-PARAM'}
+        
+        # 窗口格式topic：包含窗口数据的字典 {'realTimeData': [...]} 或 {'fee': [...]}
+        # 需要按场站分组并排序
+        self._window_format_topics = {
+            'SCHEDULE-STATION-REALTIME-DATA',  # realTimeData
+            'SCHEDULE-CAR-PRICE',              # fee
+        }
+        
+        # 全局数据topic：无stationId的全局配置数据
+        self._global_data_topics = {'SCHEDULE-ENVIRONMENT-CALENDAR'}
+        
+        # 窗口数据key映射（用于从字典中提取数据列表）
+        self._window_data_keys = {
+            'SCHEDULE-STATION-REALTIME-DATA': 'realTimeData',
+            'SCHEDULE-CAR-PRICE': 'fee',
+        }
+        
+        # 全局数据key映射
+        self._global_data_keys = {
+            'SCHEDULE-ENVIRONMENT-CALENDAR': 'calendar',
+        }
     
     @staticmethod
     def _resolve_topics(module_name, topics):
@@ -74,21 +99,111 @@ class ServiceBase:
             return list(TOPIC_TO_MODULES.keys())
     
     @staticmethod
-    def extract_station_data(topic, value):
+    def _extract_list_format(value):
+        """
+        提取列表格式数据：[{'stationId': '...', ...}, ...]
+        
+        示例：SCHEDULE-STATION-PARAM
+        
+        Args:
+            value: 原始数据（list）
+            
+        Returns:
+            list: [(station_id, data), ...]
+        """
+        station_data_list = []
+        for item in value:
+            if isinstance(item, dict):
+                station_id = item.get('stationId')
+                if station_id:
+                    station_data_list.append((station_id, item))
+        return station_data_list
+    
+    @staticmethod
+    def _extract_window_format(value, data_key):
+        """
+        提取窗口格式数据：{'realTimeData': [...]} 或 {'fee': [...]}
+        
+        窗口数据需要：
+        1. 按场站分组
+        2. 按 sendTime 排序
+        
+        示例：SCHEDULE-STATION-REALTIME-DATA, SCHEDULE-CAR-PRICE
+        
+        Args:
+            value: 原始数据（dict）
+            data_key: 数据列表的key（'realTimeData' 或 'fee'）
+            
+        Returns:
+            list: [(station_id, [sorted_data]), ...]
+        """
+        station_data_list = []
+        data_list = value.get(data_key)
+        
+        if not data_list or not isinstance(data_list, list):
+            return station_data_list
+        
+        # 按场站分组
+        from collections import defaultdict
+        station_groups = defaultdict(list)
+        
+        for item in data_list:
+            if isinstance(item, dict):
+                station_id = item.get('stationId')
+                if station_id:
+                    station_groups[station_id].append(item)
+        
+        # 对每个场站的数据按 sendTime 排序
+        for station_id, items in station_groups.items():
+            sorted_items = sorted(items, key=lambda x: x.get('sendTime', ''))
+            station_data_list.append((station_id, sorted_items))
+        
+        return station_data_list
+    
+    @staticmethod
+    def _extract_single_format(value):
+        """
+        提取单场站格式数据：{'stationId': '...', ...}
+        
+        示例：SCHEDULE-DEVICE-STORAGE, SCHEDULE-DEVICE-HOST-DCDC, SCHEDULE-CAR-ORDER
+        
+        Args:
+            value: 原始数据（dict）
+            
+        Returns:
+            list: [(station_id, data)] 单个元素的列表
+        """
+        station_id = value.get('stationId')
+        if station_id:
+            return [(station_id, value)]
+        return []
+    
+    @staticmethod
+    def _extract_global_format(value):
+        """
+        提取全局数据格式：{'calendar': [...]} 等无stationId的数据
+        
+        示例：SCHEDULE-ENVIRONMENT-CALENDAR
+        
+        Args:
+            value: 原始数据（dict）
+            
+        Returns:
+            list: [('__global__', data)]
+        """
+        return [('__global__', value)]
+    
+    def extract_station_data(self, topic, value):
         """
         从消息中提取场站数据列表
         
         职责：只负责识别消息格式并提取场站数据，不做任何解析
         
-        支持的数据格式：
-        1. 直接列表: [{'stationId': '...', ...}, ...]
-        2. 包含列表的字典: {'realTimeData': [...]} 或 {'fee': [...]}
-        3. 单场站字典: {'stationId': '...', ...}
-        4. 全局数据: {'calendar': [...]} 等无stationId的字典
-        
-        特殊处理：
-        - 对于包含窗口数据的topic（realTimeData、fee），需要按场站分组
-        - 返回格式：[(station_id, [data1, data2, ...]), ...]
+        根据 topic 类型选择对应的提取策略：
+        1. 列表格式（SCHEDULE-STATION-PARAM）
+        2. 窗口格式（SCHEDULE-STATION-REALTIME-DATA, SCHEDULE-CAR-PRICE）
+        3. 全局格式（SCHEDULE-ENVIRONMENT-CALENDAR）
+        4. 单条格式（其他 topic）
         
         Args:
             topic: topic名称
@@ -100,75 +215,52 @@ class ServiceBase:
                   - 对于单条数据：raw_data 是单个字典
                   - 全局数据返回 [('__global__', raw_data)]
         """
-        station_data_list = []
-        
         try:
-            # 格式1：直接列表 [{'stationId': '...', ...}, ...]
-            # 示例：SCHEDULE-STATION-PARAM
+            # 策略1：列表格式
+            if topic in self._list_format_topics:
+                if isinstance(value, list):
+                    return self._extract_list_format(value)
+                return []
+            
+            # 策略2：窗口格式
+            if topic in self._window_format_topics:
+                if isinstance(value, dict):
+                    data_key = self._window_data_keys.get(topic)
+                    if data_key:
+                        return self._extract_window_format(value, data_key)
+                return []
+            
+            # 策略3：全局格式
+            if topic in self._global_data_topics:
+                if isinstance(value, dict):
+                    return self._extract_global_format(value)
+                return []
+            
+            # 策略4：单条格式（默认）
+            # 兼容处理：自动识别未预先声明的 topic
             if isinstance(value, list):
-                for item in value:
-                    if isinstance(item, dict):
-                        station_id = item.get('stationId')
-                        if station_id:
-                            station_data_list.append((station_id, item))
-                return station_data_list
-            
-            # 格式2：字典格式
-            if not isinstance(value, dict):
-                return station_data_list
-            
-            # 格式2a：包含场站列表的字典 {'realTimeData': [...]} 或 {'fee': [...]}
-            # 示例：SCHEDULE-STATION-REALTIME-DATA, SCHEDULE-CAR-PRICE
-            # 这些数据需要按场站分组，因为一个消息包含多个场站的多个时间点数据
-            list_keys = ['realTimeData', 'fee']
-            for key in list_keys:
-                data_list = value.get(key)
-                if data_list and isinstance(data_list, list):
-                    # 按场站分组
-                    from collections import defaultdict
-                    station_groups = defaultdict(list)
-                    
-                    for item in data_list:
-                        if isinstance(item, dict):
-                            station_id = item.get('stationId')
-                            if station_id:
-                                station_groups[station_id].append(item)
-                    
-                    # 对每个场站的数据按 sendTime 排序
-                    for station_id, items in station_groups.items():
-                        # 按 sendTime 排序（如果存在）
-                        sorted_items = sorted(
-                            items,
-                            key=lambda x: x.get('sendTime', '')
+                # 未声明但是列表格式，尝试作为列表格式处理
+                return self._extract_list_format(value)
+            elif isinstance(value, dict):
+                # 检查是否是单场站数据
+                if 'stationId' in value:
+                    return self._extract_single_format(value)
+                
+                # 尝试识别窗口格式（未声明的新 topic）
+                for key in ['realTimeData', 'fee', 'data']:
+                    if key in value and isinstance(value[key], list):
+                        logging.warning(
+                            f"未声明的窗口格式 topic={topic}, key={key}，建议添加到配置中"
                         )
-                        # 返回整个窗口数据列表
-                        station_data_list.append((station_id, sorted_items))
-                    
-                    return station_data_list
+                        return self._extract_window_format(value, key)
+                
+                # 可能是全局数据
+                logging.warning(
+                    f"未识别的消息格式 topic={topic}, keys={list(value.keys())[:5]}"
+                )
             
-            # 格式2b：单场站数据 {'stationId': '...', ...}
-            # 示例：SCHEDULE-DEVICE-STORAGE, SCHEDULE-DEVICE-HOST-DCDC
-            station_id = value.get('stationId')
-            if station_id:
-                station_data_list.append((station_id, value))
-                return station_data_list
-            
-            # 格式2c：全局数据（无stationId）
-            # 示例：SCHEDULE-ENVIRONMENT-CALENDAR {'calendar': [...]}
-            # 检查是否包含已知的全局数据字段
-            global_keys = ['calendar']  # 可扩展其他全局数据的key
-            for key in global_keys:
-                if key in value:
-                    # 确认是全局数据，返回特殊标识
-                    station_data_list.append(('__global__', value))
-                    return station_data_list
-            
-            # 其他未识别的字典格式，记录警告
-            logging.warning(
-                f"未识别的消息格式 topic={topic}, keys={list(value.keys())[:5]}"
-            )
+            return []
             
         except Exception as exc:
             handle_error(exc, context=f"提取场站数据 topic={topic}")
-        
-        return station_data_list
+            return []

@@ -91,6 +91,9 @@ class AsyncDataAnalysisService(ServiceBase):
             bool: 消息是否成功处理
         """
         topic = msg.topic
+        # 获取Kafka消息的原生时间戳（毫秒转秒）
+        kafka_timestamp = msg.timestamp / 1000.0
+        
         try:
             value_str = msg.value.decode("utf-8")
             value = json.loads(value_str)
@@ -116,7 +119,7 @@ class AsyncDataAnalysisService(ServiceBase):
                         if known_stations:
                             logging.info(f"广播全局数据 topic={topic} 到 {len(known_stations)} 个场站")
                             for sid in known_stations:
-                                self.dispatcher.update_topic_data(sid, topic, station_data)
+                                self.dispatcher.update_topic_data(sid, topic, station_data, kafka_timestamp)
                                 if sid in self._station_data_events:
                                     self._station_data_events[sid].set()
                         else:
@@ -124,8 +127,10 @@ class AsyncDataAnalysisService(ServiceBase):
                         continue
                     
                     # 处理场站数据
-                    # 直接将原始数据交给dispatcher
-                    self.dispatcher.update_topic_data(station_id, topic, station_data)
+                    # 将原始数据交给dispatcher（使用Kafka原生时间戳）
+                    should_trigger = self.dispatcher.update_topic_data(
+                        station_id, topic, station_data, kafka_timestamp
+                    )
                     
                     # 创建场站任务（如果不存在）
                     if station_id not in self._station_tasks:
@@ -134,13 +139,15 @@ class AsyncDataAnalysisService(ServiceBase):
                         if self._global_data_cache:
                             logging.info(f"新场站 {station_id} 注册，应用 {len(self._global_data_cache)} 个全局数据")
                             for global_topic, global_data in self._global_data_cache.items():
-                                self.dispatcher.update_topic_data(station_id, global_topic, global_data)
+                                self.dispatcher.update_topic_data(station_id, global_topic, global_data, kafka_timestamp)
                         
                         # 创建场站任务（此时全局数据已就绪）
                         self._create_station_task(station_id)
                     
-                    # 触发数据就绪事件
-                    if station_id in self._station_data_events:
+                    # 根据 dispatcher 返回值决定是否触发数据就绪事件
+                    # 订单类 topic：只有进入新的一秒时才触发（上一秒订单已聚合完成）
+                    # 其他 topic：每次更新都触发
+                    if should_trigger and station_id in self._station_data_events:
                         self._station_data_events[station_id].set()
                     
                 except Exception as exc:
@@ -182,15 +189,24 @@ class AsyncDataAnalysisService(ServiceBase):
         """
         场站Worker - 事件驱动模式
         
-        当有新数据到达时立即处理
+        当有新数据到达时立即处理。
+        
+        超时机制：
+        - 等待数据事件最多2秒
+        - 超时后也会触发一次处理（确保订单等聚合数据不会永久等待）
+        - 业务模块通过 _data_quality 判断数据是否完整
         """
         while not stop_flag.is_set():
             try:
                 # 等待数据就绪事件（有新数据到达）或超时
+                # 超时设置为2秒：确保即使没有新订单，上一秒的订单也会被处理
+                data_arrived = False
                 try:
-                    await asyncio.wait_for(data_event.wait(), timeout=5.0)
+                    await asyncio.wait_for(data_event.wait(), timeout=2.0)
+                    data_arrived = True
                 except asyncio.TimeoutError:
-                    # 超时也继续，以便定期检查 stop_flag
+                    # 超时：可能有未处理的聚合数据（如订单）
+                    # 继续执行，让业务模块决定是否处理
                     pass
                 
                 # 清除事件，准备下次触发
@@ -202,6 +218,17 @@ class AsyncDataAnalysisService(ServiceBase):
                 else:
                     # 如果未指定模块名，则获取所有模块输入
                     module_input = self.dispatcher.get_all_inputs(station_id)
+                
+                # 如果没有数据可用，跳过处理
+                if not module_input:
+                    continue
+                
+                # 检查是否有可用的topic数据
+                data_quality = None
+                if isinstance(module_input, dict):
+                    data_quality = module_input.get('_data_quality')
+                if data_quality and not data_quality.get('available_topics'):
+                    continue
                 
                 result = None
                 if callback:
@@ -367,13 +394,19 @@ class DataAnalysisService(ServiceBase):
     def _station_worker(self, station_id, callback, result_handler, stop_event, data_event):
         """
         场站工作线程（同步版本）
-        等待数据就绪事件，然后处理数据
+        
+        等待数据就绪事件，然后处理数据。
+        
+        超时机制：
+        - 等待数据事件最多2秒
+        - 超时后也会触发一次处理（确保订单等聚合数据不会永久等待）
+        - 业务模块通过 _data_quality 判断数据是否完整
         """
         while not stop_event.is_set():
             try:
-                # 等待数据就绪事件（最多等待5秒）
-                if not data_event.wait(timeout=5.0):
-                    continue  # 超时，继续下一轮
+                # 等待数据就绪事件（最多等待2秒）
+                # 超时设置为2秒：确保即使没有新订单，上一秒的订单也会被处理
+                data_arrived = data_event.wait(timeout=2.0)
                 
                 # 清除事件标志，为下一次数据准备
                 data_event.clear()
@@ -384,6 +417,17 @@ class DataAnalysisService(ServiceBase):
                 else:
                     # 如果未指定模块名，则获取所有模块输入
                     module_input = self.dispatcher.get_all_inputs(station_id)
+                
+                # 如果没有数据可用，跳过处理
+                if not module_input:
+                    continue
+                
+                # 检查是否有可用的topic数据
+                data_quality = None
+                if isinstance(module_input, dict):
+                    data_quality = module_input.get('_data_quality')
+                if data_quality and not data_quality.get('available_topics'):
+                    continue
                 
                 result = None
                 if callback:
@@ -414,6 +458,8 @@ class DataAnalysisService(ServiceBase):
                     topic = tp.topic
                     for msg in msgs:
                         value = msg.value
+                        # 获取Kafka消息的原生时间戳（毫秒转秒）
+                        kafka_timestamp = msg.timestamp / 1000.0
                         
                         try:
                             # 提取场站列表和对应的数据（使用基类方法）
@@ -436,7 +482,7 @@ class DataAnalysisService(ServiceBase):
                                         if known_stations:
                                             logging.info(f"广播全局数据 topic={topic} 到 {len(known_stations)} 个场站")
                                             for sid in known_stations:
-                                                self.dispatcher.update_topic_data(sid, topic, station_data)
+                                                self.dispatcher.update_topic_data(sid, topic, station_data, kafka_timestamp)
                                                 if sid in self._station_data_events:
                                                     self._station_data_events[sid].set()
                                         else:
@@ -444,8 +490,10 @@ class DataAnalysisService(ServiceBase):
                                         continue
                                     
                                     # 处理场站数据
-                                    # 直接将原始数据交给dispatcher
-                                    self.dispatcher.update_topic_data(station_id, topic, station_data)
+                                    # 将原始数据交给dispatcher（使用Kafka原生时间戳）
+                                    should_trigger = self.dispatcher.update_topic_data(
+                                        station_id, topic, station_data, kafka_timestamp
+                                    )
                                     
                                     # 创建或管理场站线程
                                     if station_id not in self._station_threads:
@@ -454,7 +502,7 @@ class DataAnalysisService(ServiceBase):
                                         if self._global_data_cache:
                                             logging.info(f"新场站 {station_id} 注册，应用 {len(self._global_data_cache)} 个全局数据")
                                             for global_topic, global_data in self._global_data_cache.items():
-                                                self.dispatcher.update_topic_data(station_id, global_topic, global_data)
+                                                self.dispatcher.update_topic_data(station_id, global_topic, global_data, kafka_timestamp)
                                         
                                         # 创建场站线程（此时全局数据已就绪）
                                         stop_event = threading.Event()
@@ -471,8 +519,10 @@ class DataAnalysisService(ServiceBase):
                                         )
                                         self._station_threads[station_id] = future
                                     
-                                    # 触发数据就绪事件（如果该场站正在被监控）
-                                    if station_id in self._station_data_events:
+                                    # 根据 dispatcher 返回值决定是否触发数据就绪事件
+                                    # 订单类 topic：只有进入新的一秒时才触发（上一秒订单已聚合完成）
+                                    # 其他 topic：每次更新都触发
+                                    if should_trigger and station_id in self._station_data_events:
                                         self._station_data_events[station_id].set()
                                 except Exception as exc:
                                     handle_error(
