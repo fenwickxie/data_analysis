@@ -32,6 +32,7 @@ from .config import KAFKA_CONFIG, TOPIC_TO_MODULES, MODULE_TO_TOPICS, OFFSET_COM
 from .dispatcher import DataDispatcher
 from .service_base import ServiceBase
 from .offset_manager import OffsetManager
+from .batch_result_aggregator import BatchResultAggregator
 
 
 class AsyncDataAnalysisService(ServiceBase):
@@ -63,14 +64,22 @@ class AsyncDataAnalysisService(ServiceBase):
             offset_commit_config or OFFSET_COMMIT_CONFIG
         )
         
+        # 批次结果聚合器
+        self.batch_aggregator = BatchResultAggregator(
+            batch_timeout=5.0,  # 5秒超时
+            cleanup_interval=60.0
+        )
+        
         self._station_tasks = {}
         self._station_stop_flags = {}
         self._station_data_events = {}  # 每个场站的数据就绪事件
+        self._station_batch_info = {}  # 场站的批次信息: {station_id: batch_id}
         self._global_data_cache = {}  # 缓存全局数据: {topic: latest_data}
         self._main_task = None
         self._stop_event = asyncio.Event()
         self._callback = None
         self._result_handler = result_handler
+        self._batch_upload_handler = None  # 批次上传回调
 
     async def _maybe_await(self, func, *args):
         if func is None:
@@ -80,15 +89,16 @@ class AsyncDataAnalysisService(ServiceBase):
             return await result
         return result
     
-    async def _process_message(self, msg):
+    async def _process_message(self, msg, batch_id=None):
         """
         处理单条消息(使用基类和OffsetManager)
         
         Args:
             msg: Kafka消息对象
+            batch_id: 批次ID（可选，由_main_loop传入）
             
         Returns:
-            bool: 消息是否成功处理
+            tuple: (是否成功, 场站ID列表)
         """
         topic = msg.topic
         # 获取Kafka消息的原生时间戳（毫秒转秒）
@@ -103,7 +113,13 @@ class AsyncDataAnalysisService(ServiceBase):
             
             if not station_data_list:
                 logging.debug(f"消息中没有提取到场站数据: topic={topic}")
-                return False
+                return False, []
+            
+            # 提取场站列表（排除全局数据）
+            station_ids = [
+                sid for sid, _ in station_data_list
+                if sid != '__global__'
+            ]
             
             # 处理每个场站的数据
             all_success = True
@@ -131,6 +147,9 @@ class AsyncDataAnalysisService(ServiceBase):
                     should_trigger = self.dispatcher.update_topic_data(
                         station_id, topic, station_data, kafka_timestamp
                     )
+                    
+                    # 记录场站的批次信息
+                    self._station_batch_info[station_id] = batch_id
                     
                     # 创建场站任务（如果不存在）
                     if station_id not in self._station_tasks:
@@ -160,16 +179,16 @@ class AsyncDataAnalysisService(ServiceBase):
             # 使用 OffsetManager 跟踪消息
             if all_success and len(station_data_list) > 0:
                 self.offset_manager.track_message(msg)
-                return True
+                return True, station_ids
             
-            return False
+            return False, station_ids
             
         except Exception as exc:
             handle_error(exc, context=f"处理消息 topic={topic}, partition={msg.partition}, offset={msg.offset}")
-            return False
+            return False, []
     
     def _create_station_task(self, station_id):
-        """创建场站任务（提取为独立方法）"""
+        """创建场站任务"""
         stop_flag = asyncio.Event()
         data_event = asyncio.Event()
         self._station_stop_flags[station_id] = stop_flag
@@ -212,6 +231,9 @@ class AsyncDataAnalysisService(ServiceBase):
                 # 清除事件，准备下次触发
                 data_event.clear()
                 
+                # 获取场站的批次ID
+                batch_id = self._station_batch_info.get(station_id)
+                
                 # 获取解析后的输入数据（只获取指定模块的输入）
                 if self.module_name:
                     module_input = self.dispatcher.get_module_input(station_id, self.module_name)
@@ -221,6 +243,7 @@ class AsyncDataAnalysisService(ServiceBase):
                 
                 # 如果没有数据可用，跳过处理
                 if not module_input:
+                    logging.debug(f"场站 {station_id} 没有可用数据，跳过处理")
                     continue
                 
                 # 检查是否有可用的topic数据
@@ -228,7 +251,10 @@ class AsyncDataAnalysisService(ServiceBase):
                 if isinstance(module_input, dict):
                     data_quality = module_input.get('_data_quality')
                 if data_quality and not data_quality.get('available_topics'):
+                    logging.debug(f"场站 {station_id} 没有可用的topic数据")
                     continue
+                
+                logging.info(f"场站 {station_id} 开始处理，batch_id={batch_id}")
                 
                 result = None
                 if callback:
@@ -237,8 +263,26 @@ class AsyncDataAnalysisService(ServiceBase):
                         result = await self._maybe_await(
                             callback, station_id, module_input
                         )
+                        logging.info(f"场站 {station_id} 处理完成，result={'有' if result else '无'}")
                     except Exception as exc:  # noqa: BLE001
                         handle_error(exc, context=f"回调处理 station_id={station_id}")
+                        result = None  # 确保失败时result为None
+                
+                # 提交结果到批次聚合器（即使result是None也要提交）
+                if batch_id and self._batch_upload_handler:
+                    batch_collector = self.batch_aggregator._batches.get(batch_id)
+                    if batch_collector:
+                        await batch_collector.add_result(station_id, result)
+                        logging.info(f"场站 {station_id} 结果已提交到批次 {batch_id}")
+                    else:
+                        logging.warning(f"场站 {station_id} 找不到批次 {batch_id}，可用批次: {list(self.batch_aggregator._batches.keys())}")
+                else:
+                    if not batch_id:
+                        logging.warning(f"场站 {station_id} 没有batch_id")
+                    if not self._batch_upload_handler:
+                        logging.warning(f"场站 {station_id} 没有配置batch_upload_handler")
+                
+                # 保持原有的result_handler逻辑（单场站处理）
                 if result_handler:
                     try:
                         await self._maybe_await(
@@ -276,9 +320,41 @@ class AsyncDataAnalysisService(ServiceBase):
                     await asyncio.sleep(0.2)
                     continue
                 
-                # 处理批次中的每条消息
+                # 为这一批消息生成批次ID
+                batch_id = f"batch_{int(time.time() * 1000)}_{id(batch)}"
+                
+                # 收集所有场站ID（第一遍扫描）
+                all_station_ids = []
                 for msg in batch:
-                    await self._process_message(msg)
+                    try:
+                        value_str = msg.value.decode("utf-8")
+                        value = json.loads(value_str)
+                        station_data_list = self.extract_station_data(msg.topic, value)
+                        
+                        if station_data_list:
+                            # 提取场站列表（排除全局数据）
+                            station_ids = [
+                                sid for sid, _ in station_data_list
+                                if sid != '__global__'
+                            ]
+                            all_station_ids.extend(station_ids)
+                    except Exception as exc:
+                        logging.error(f"扫描消息场站ID失败: {exc}")
+                
+                # 1. 先创建批次（如果有场站数据且配置了上传回调）
+                if all_station_ids and self._batch_upload_handler:
+                    # 去重场站ID
+                    unique_stations = list(set(all_station_ids))
+                    await self.batch_aggregator.get_or_create_batch(
+                        batch_id=batch_id,
+                        expected_stations=unique_stations,
+                        upload_callback=self._batch_upload_handler
+                    )
+                    logging.info(f"创建批次 {batch_id}，包含 {len(unique_stations)} 个场站")
+                
+                # 2. 再处理所有消息（此时批次已存在）
+                for msg in batch:
+                    await self._process_message(msg, batch_id)
                 
                 # 检查是否需要提交offset
                 if self.offset_manager.should_commit():
@@ -302,10 +378,22 @@ class AsyncDataAnalysisService(ServiceBase):
                     *self._station_tasks.values(), return_exceptions=True
                 )
 
-    async def start(self, callback=None, result_handler=None):
+    async def start(self, callback=None, result_handler=None, batch_upload_handler=None):
+        """
+        启动服务
+        
+        Args:
+            callback: 单场站处理回调 (station_id, module_input) -> result
+            result_handler: 单场站结果处理回调 (station_id, module_input, result) -> None
+            batch_upload_handler: 批次上传回调 (batch_id, results_list) -> None
+                - results_list: 所有场站输出结果组成的列表 [result1, result2, ...]
+                - 每个result是场站的输出字典
+        """
         self._callback = callback or self._callback
         if result_handler is not None:
             self._result_handler = result_handler
+        if batch_upload_handler is not None:
+            self._batch_upload_handler = batch_upload_handler
         self._main_task = asyncio.create_task(self._main_loop())
 
     async def stop(self):

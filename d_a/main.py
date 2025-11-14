@@ -76,9 +76,25 @@ async def my_model_predict(module_input):
 
 
 async def my_callback(station_id, module_input):
-    # module_input为本模型所需结构化输入（含窗口补全/插值、依赖聚合）
-    result = await my_model_predict(module_input)
-    return result  # 返回值将交由result_handler处理
+    """
+    单场站处理回调
+    
+    Args:
+        station_id: 场站ID
+        module_input: 模块输入数据
+        
+    Returns:
+        dict: 必须包含 'station_id' 字段的结果字典
+        None: 处理失败
+    """
+    try:
+        result = await my_model_predict(module_input)
+        # 在结果中添加 station_id
+        result["station_id"] = station_id
+        return result
+    except Exception as e:
+        logging.error(f"场站 {station_id} 处理失败: {e}")
+        return None  # 返回None表示失败，不会阻塞批次上传
 
 
 async def main():
@@ -88,35 +104,44 @@ async def main():
 
     producer = AsyncKafkaProducerClient(KAFKA_CONFIG)
     await producer.start()
-    # 方式1: 使用默认配置（推荐）
+    
     service = AsyncDataAnalysisService(module_name=MODULE_NAME)
-    # 方式2: 自定义offset配置
-    # custom_offset_config = {
-    #     'commit_interval_seconds': 3.0,  # 更频繁提交
-    #     'commit_batch_size': 50,         # 更小批次
-    #     'max_commit_retries': 5,
-    #     'commit_retry_delay': 2.0,
-    # }
-    # service = AsyncDataAnalysisService(
-    #     module_name='load_prediction',
-    #     result_handler=my_result_handler,
-    #     offset_commit_config=custom_offset_config
-    # )
-    async def result_handler(station_id, module_input, result):
-        if result is None:
+    
+    async def batch_upload_handler(batch_id, results_list):
+        """
+        批次上传回调
+        
+        Args:
+            batch_id: 批次ID
+            results_list: 成功场站的结果列表，每个元素是包含 station_id 的字典
+                [
+                    {"station_id": "S001", "result": 123, ...},
+                    {"station_id": "S002", "result": 456, ...},
+                    ...
+                ]
+        """
+        if not results_list:
+            logging.warning(f"批次 {batch_id} 没有成功的结果，跳过上传")
             return
+        
         payload = {
-            "station_id": station_id,
+            "batch_id": batch_id,
             "module": MODULE_NAME,
             "timestamp": time.time(),
+            "stations_count": len(results_list),
+            "results": results_list  # 所有场站的结果列表
         }
-        payload.update(result)
+        
         try:
             await producer.send(output_topic, payload)
-        except Exception as exc:  # noqa: BLE001
-            logging.error("Kafka上传失败", exc_info=exc)
+            logging.info(f"批次上传成功: {batch_id}, {len(results_list)} 个场站")
+        except Exception as exc:
+            logging.error(f"批次上传失败: {batch_id}", exc_info=exc)
     
-    await service.start(callback=my_callback, result_handler=result_handler)
+    await service.start(
+        callback=my_callback,
+        batch_upload_handler=batch_upload_handler
+    )
     try:
         # await asyncio.Event().wait()  # 永久等待，简单等待，不打印状态
         while True:  # 模拟主循环

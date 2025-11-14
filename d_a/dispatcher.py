@@ -358,7 +358,7 @@ class DataDispatcher:
                         # 添加空列表
                         fields = TOPIC_DETAIL.get(topic, {}).get("fields", [])
                         for field in fields:
-                            if field is not 'stationId':
+                            if field != 'stationId':
                                 input_data[field] = []
                         input_data['sendTime'] = []
                 
