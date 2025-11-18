@@ -39,16 +39,13 @@ version: 1.0
 
 
 # ===================== 异步示例 =====================
-# 
-# 性能优化说明：
-# - 指定 MODULE_NAME 后，服务会自动只订阅该模块需要的 topics
-# - 避免订阅和处理无关的 topics，节省网络、CPU、内存资源
-# - 例如：load_prediction 只订阅约 3-5 个相关 topics，而非全部 11 个
+
 #
 from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 import sys
 import time
 from pathlib import Path
@@ -69,8 +66,8 @@ else:
     from .config import KAFKA_CONFIG, MODULE_OUTPUT_TOPICS
 
 
+# 模型封装入口范例（异步）
 async def my_model_predict(module_input):
-    # 这里写模型推理逻辑
     print(module_input)
     return {"result": 123}
 
@@ -78,11 +75,11 @@ async def my_model_predict(module_input):
 async def my_callback(station_id, module_input):
     """
     单场站处理回调
-    
+
     Args:
         station_id: 场站ID
         module_input: 模块输入数据
-        
+
     Returns:
         dict: 必须包含 'station_id' 字段的结果字典
         None: 处理失败
@@ -104,13 +101,13 @@ async def main():
 
     producer = AsyncKafkaProducerClient(KAFKA_CONFIG)
     await producer.start()
-    
+
     service = AsyncDataAnalysisService(module_name=MODULE_NAME)
-    
+
     async def batch_upload_handler(batch_id, results_list):
         """
         批次上传回调
-        
+
         Args:
             batch_id: 批次ID
             results_list: 成功场站的结果列表，每个元素是包含 station_id 的字典
@@ -123,38 +120,53 @@ async def main():
         if not results_list:
             logging.warning(f"批次 {batch_id} 没有成功的结果，跳过上传")
             return
-        
+
         payload = {
             "batch_id": batch_id,
             "module": MODULE_NAME,
             "timestamp": time.time(),
             "stations_count": len(results_list),
-            "results": results_list  # 所有场站的结果列表
+            "results": results_list,  # 所有场站的结果列表
         }
-        
+
         try:
             await producer.send(output_topic, payload)
             logging.info(f"批次上传成功: {batch_id}, {len(results_list)} 个场站")
         except Exception as exc:
             logging.error(f"批次上传失败: {batch_id}", exc_info=exc)
-    
-    await service.start(
-        callback=my_callback,
-        batch_upload_handler=batch_upload_handler
-    )
+
+    await service.start(callback=my_callback, batch_upload_handler=batch_upload_handler)
+
     try:
-        # await asyncio.Event().wait()  # 永久等待，简单等待，不打印状态
-        while True:  # 模拟主循环
-            print(service.get_station_status())
-            await asyncio.sleep(10)
-    except KeyboardInterrupt:
-        logging.info("收到停止信号，开始停机...")
+        print("服务已启动，按 Ctrl+C 停止...")
+        while True:
+            status = service.get_station_status()
+            print(status)
+            # 使用多个短暂的 sleep 以提高响应性
+            for _ in range(10):
+                await asyncio.sleep(1)
+    except (KeyboardInterrupt, asyncio.CancelledError) as e:
+        print(f"\n程序被用户中断 ({type(e).__name__})，正在清理资源...")
+        logging.info(f"收到停止信号: {type(e).__name__}，开始停机...")
     finally:
+        print("正在停止服务...")
         # 停止服务（会自动提交所有pending offsets）
         await service.stop()
+        print("正在停止生产者...")
         await producer.stop()
         logging.info("服务已停止")
+        print("清理完成")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        loop.run_until_complete(main())
+    except KeyboardInterrupt:
+        print("\n捕获到键盘中断")
+    finally:
+        print("关闭事件循环...")
+        loop.close()
+        print("程序已退出")

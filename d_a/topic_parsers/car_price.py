@@ -90,4 +90,4 @@ class CarPriceParser(ParserBase):
             return {}
         
         # 使用最新的价格数据（已经是单条数据，不是包含 'fee' 键的字典）
-        return self.parse(window_data[-1])
+        return self.parse(window_data[-1][-1]) # 取最后一条数据
