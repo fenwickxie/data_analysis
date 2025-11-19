@@ -16,11 +16,12 @@ KAFKA_CONFIG = {
     'bootstrap_servers': ['10.8.4.40:35888'],
     'consumer': {
         'group_id': 'stack-charge-tcp-command-xfy',
-        'auto_offset_reset': 'latest',
+        'auto_offset_reset': 'latest', # 'earliest' 或 'latest'，默认从最新消息开始消费
         'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
-        'max_poll_records': 3000,
-        'enable_auto_commit': False,
+        'multi_consumer_mode': True,  # 启用多消费者模式：为每个topic创建独立消费者，解决消息积压时的topic饥饿问题
+        'max_poll_records': 500,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
+        'enable_auto_commit': False,  # 关闭自动提交，由服务统一管理
     },
     'listener': {
         'ack-mode': 'manual',

@@ -179,6 +179,8 @@ class AsyncKafkaConsumerClient:
         self.loop = loop or asyncio.get_event_loop()
         self.consumer = None
         self._pending_messages = deque()
+        self._multi_consumer_mode = False
+        self._topic_consumers = {}  # {topic: consumer} 多消费者模式
 
     async def start(self):
         consumer_cfg = self.config.get('consumer', {}) if isinstance(self.config, dict) else {}
@@ -199,24 +201,98 @@ class AsyncKafkaConsumerClient:
             if k not in base_kwargs and k in self.config:
                 base_kwargs[k] = self.config[k]
 
-        self.consumer = AIOKafkaConsumer(
-            *self.topics,
-            loop=self.loop,
-            bootstrap_servers=bootstrap,
-            **base_kwargs,
-        )
-        await self.consumer.start()
+        # 检查是否启用多消费者模式
+        self._multi_consumer_mode = consumer_cfg.get('multi_consumer_mode', False)
+        
+        if self._multi_consumer_mode and len(self.topics) > 1:
+            # 多消费者模式：为每个topic创建独立的消费者
+            logging.info(f"启用多消费者模式，为 {len(self.topics)} 个topic创建独立消费者")
+            
+            # 为每个topic单独限制max_poll_records
+            per_topic_max_records = base_kwargs.get('max_poll_records', 500)
+            
+            for topic in self.topics:
+                topic_kwargs = base_kwargs.copy()
+                # 为每个topic的消费者设置合理的拉取上限
+                topic_kwargs['max_poll_records'] = per_topic_max_records
+                
+                consumer = AIOKafkaConsumer(
+                    topic,
+                    loop=self.loop,
+                    bootstrap_servers=bootstrap,
+                    **topic_kwargs,
+                )
+                await consumer.start()
+                self._topic_consumers[topic] = consumer
+                logging.info(f"Topic {topic} 消费者已启动，max_poll_records={per_topic_max_records}")
+        else:
+            # 单消费者模式（原有逻辑）
+            if self._multi_consumer_mode:
+                logging.warning("多消费者模式需要订阅多个topic，当前只有1个topic，使用单消费者模式")
+            
+            self.consumer = AIOKafkaConsumer(
+                *self.topics,
+                loop=self.loop,
+                bootstrap_servers=bootstrap,
+                **base_kwargs,
+            )
+            await self.consumer.start()
 
     async def getmany(self, timeout_ms=1000, max_records=None):
-        if self.consumer is None:
-            raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
-        records = await self.consumer.getmany(
-            timeout_ms=timeout_ms, max_records=max_records
-        )
-        batch = []
-        for msgs in records.values():
-            batch.extend(msgs)
-        return batch
+        """
+        拉取多条消息
+        
+        Args:
+            timeout_ms: 超时时间（毫秒）
+            max_records: 最大记录数（仅在单消费者模式下生效）
+            
+        Returns:
+            list: 消息列表
+        """
+        if self._multi_consumer_mode:
+            # 多消费者模式：并发从所有topic消费者拉取消息
+            tasks = []
+            for topic, consumer in self._topic_consumers.items():
+                tasks.append(self._fetch_from_consumer(consumer, timeout_ms, max_records))
+            
+            # 并发拉取所有topic的消息
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 合并所有消息
+            batch = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    topic = list(self._topic_consumers.keys())[i]
+                    logging.error(f"从topic {topic} 拉取消息失败: {result}")
+                elif isinstance(result, list):
+                    batch.extend(result)
+            
+            return batch
+        else:
+            # 单消费者模式（原有逻辑）
+            if self.consumer is None:
+                raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
+            records = await self.consumer.getmany(
+                timeout_ms=timeout_ms, max_records=max_records
+            )
+            batch = []
+            for msgs in records.values():
+                batch.extend(msgs)
+            return batch
+    
+    async def _fetch_from_consumer(self, consumer, timeout_ms, max_records):
+        """从单个消费者拉取消息"""
+        try:
+            records = await consumer.getmany(
+                timeout_ms=timeout_ms, max_records=max_records
+            )
+            batch = []
+            for msgs in records.values():
+                batch.extend(msgs)
+            return batch
+        except Exception as e:
+            logging.error(f"消费者拉取消息异常: {e}")
+            return []
 
     async def getone(self, timeout_ms=1000):
         try:
@@ -243,28 +319,115 @@ class AsyncKafkaConsumerClient:
         Returns:
             bool: 提交是否成功
         """
-        if self.consumer is None:
-            raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
-        
-        try:
-            if offsets:
-                # 提交指定的offsets
-                await self.consumer.commit(offsets)
-            else:
-                # 提交当前消费位置
-                await self.consumer.commit()
-            return True
-        except Exception as e:
-            logging.error(f"提交offset失败: {e}")
-            return False
+        if self._multi_consumer_mode:
+            # 多消费者模式：提交所有消费者的offset
+            success = True
+            for topic, consumer in self._topic_consumers.items():
+                try:
+                    if offsets:
+                        # 过滤出该topic的offsets
+                        topic_offsets = {
+                            tp: om for tp, om in offsets.items() 
+                            if tp.topic == topic
+                        }
+                        if topic_offsets:
+                            await consumer.commit(topic_offsets)
+                    else:
+                        await consumer.commit()
+                except Exception as e:
+                    logging.error(f"提交topic {topic} 的offset失败: {e}")
+                    success = False
+            return success
+        else:
+            # 单消费者模式（原有逻辑）
+            if self.consumer is None:
+                raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
+            
+            try:
+                if offsets:
+                    # 提交指定的offsets
+                    await self.consumer.commit(offsets)
+                else:
+                    # 提交当前消费位置
+                    await self.consumer.commit()
+                return True
+            except Exception as e:
+                logging.error(f"提交offset失败: {e}")
+                return False
     
     def get_consumer(self):
-        """获取底层的AIOKafkaConsumer实例（用于访问TopicPartition等）"""
+        """
+        获取底层的AIOKafkaConsumer实例（用于访问TopicPartition等）
+        多消费者模式下返回消费者字典
+        """
+        if self._multi_consumer_mode:
+            return self._topic_consumers
         return self.consumer
             
     async def stop(self):
-        if self.consumer:
+        """停止所有消费者"""
+        if self._multi_consumer_mode:
+            # 停止所有topic的消费者
+            for topic, consumer in self._topic_consumers.items():
+                try:
+                    await consumer.stop()
+                    logging.info(f"Topic {topic} 消费者已停止")
+                except Exception as e:
+                    logging.error(f"停止topic {topic} 消费者失败: {e}")
+        elif self.consumer:
             await self.consumer.stop()
+    
+    def get_lag_info(self):
+        """
+        获取消息积压信息（lag）
+        
+        Returns:
+            dict: {topic: {partition: lag}}
+        """
+        lag_info = {}
+        
+        if self._multi_consumer_mode:
+            for topic, consumer in self._topic_consumers.items():
+                try:
+                    lag_info[topic] = self._calculate_consumer_lag(consumer)
+                except Exception as e:
+                    logging.error(f"获取topic {topic} lag信息失败: {e}")
+                    lag_info[topic] = {}
+        elif self.consumer:
+            try:
+                # 单消费者模式：按topic分组
+                all_partitions = self.consumer.assignment()
+                for tp in all_partitions:
+                    topic = tp.topic
+                    if topic not in lag_info:
+                        lag_info[topic] = {}
+                    
+                    position = self.consumer.position(tp)
+                    # 注意：这需要同步调用，在异步环境中可能有问题
+                    # 生产环境建议使用专门的监控工具
+                    lag_info[topic][tp.partition] = {
+                        'current_offset': position,
+                        'lag': 'N/A'  # aiokafka 不直接支持获取end offset
+                    }
+            except Exception as e:
+                logging.error(f"获取lag信息失败: {e}")
+        
+        return lag_info
+    
+    def _calculate_consumer_lag(self, consumer):
+        """计算单个消费者的lag"""
+        lag_by_partition = {}
+        try:
+            partitions = consumer.assignment()
+            for tp in partitions:
+                position = consumer.position(tp)
+                lag_by_partition[tp.partition] = {
+                    'current_offset': position,
+                    'lag': 'N/A'
+                }
+        except Exception as e:
+            logging.error(f"计算lag失败: {e}")
+        return lag_by_partition
 
 
 class AsyncKafkaProducerClient:

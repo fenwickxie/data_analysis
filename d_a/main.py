@@ -139,9 +139,28 @@ async def main():
 
     try:
         print("服务已启动，按 Ctrl+C 停止...")
+        print(f"多消费者模式: {service.consumer._multi_consumer_mode}")
+        if service.consumer._multi_consumer_mode:
+            print(f"订阅的 topic 数量: {len(service.consumer._topic_consumers)}")
+        
+        iteration = 0
         while True:
-            status = service.get_station_status()
-            print(status)
+            iteration += 1
+            
+            # 每隔 10 次迭代显示详细信息
+            if iteration % 10 == 0:
+                status = service.get_station_status()
+                print(f"\n=== 第 {iteration} 次循环 ===")
+                print(f"活跃场站数: {len(status)}")
+                
+                # 显示消息积压信息（多消费者模式）
+                if service.consumer._multi_consumer_mode:
+                    lag_info = service.consumer.get_lag_info()
+                    if lag_info:
+                        print("\n消息积压情况:")
+                        for topic, partitions in lag_info.items():
+                            print(f"  {topic}: {len(partitions)} 个分区")
+            
             # 使用多个短暂的 sleep 以提高响应性
             for _ in range(10):
                 await asyncio.sleep(1)
