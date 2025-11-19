@@ -15,13 +15,22 @@ version: 1.0
 KAFKA_CONFIG = {
     'bootstrap_servers': ['10.8.4.40:35888'],
     'consumer': {
-        'group_id': 'stack-charge-tcp-command-xfy',
+        'group_id': 'stack-charge-tcp-command-xfy',  # ⚠️ 如果从单消费者模式切换到多消费者模式，建议修改为新的 group_id（如：xxx-v2）避免读取旧的过期 offset
         'auto_offset_reset': 'latest', # 'earliest' 或 'latest'，默认从最新消息开始消费
         'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
+        # 多消费者模式配置
         'multi_consumer_mode': True,  # 启用多消费者模式：为每个topic创建独立消费者，解决消息积压时的topic饥饿问题
-        'max_poll_records': 500,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
+        'max_poll_records': 200,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
         'enable_auto_commit': False,  # 关闭自动提交，由服务统一管理
+        # 字节数限制
+        "max_partition_fetch_bytes": 100 * 1024 * 1024,   # 单分区100MB
+        "fetch_max_bytes": 500 * 1024 * 1024,            # 单次请求500MB
+        "fetch_max_wait_ms": 500,                        # 最多等待500ms
+        "fetch_min_bytes": 1,                            # 至少1字节就返回
+        # # 增加会话超时，避免 rebalance
+        # "session_timeout_ms": 60000, 
+        # "max_poll_interval_ms": 600000,
     },
     'listener': {
         'ack-mode': 'manual',
@@ -118,7 +127,7 @@ MODULE_DEPENDENCIES = {
     'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
     'station_guidance': ['load_prediction', 'evaluation_model'],
     'thermal_management': ['load_prediction', 'operation_optimization'],
-    'operation_optimization': ['pv_prediction'],
+    'operation_optimization': ['load_prediction'],
     # 其他模块依赖可扩展
 }
 

@@ -31,14 +31,40 @@ Topic E: 10 条积压消息
 
 ### 架构设计
 
-为**每个 topic 创建独立的消费者实例**，每个消费者有自己的 `max_poll_records` 配额：
+为**每个 topic 创建独立的消费者实例**，每个消费者有自己的 `max_poll_records` 配额和**独立的 consumer group**：
 
 ```
-Topic A → Consumer A (max_poll_records: 500)
-Topic B → Consumer B (max_poll_records: 500)
-Topic C → Consumer C (max_poll_records: 500)
-Topic D → Consumer D (max_poll_records: 500)
-Topic E → Consumer E (max_poll_records: 500)
+Topic A → Consumer A (group_id: mygroup-TopicA, max_poll_records: 500)
+Topic B → Consumer B (group_id: mygroup-TopicB, max_poll_records: 500)
+Topic C → Consumer C (group_id: mygroup-TopicC, max_poll_records: 500)
+Topic D → Consumer D (group_id: mygroup-TopicD, max_poll_records: 500)
+Topic E → Consumer E (group_id: mygroup-TopicE, max_poll_records: 500)
+```
+
+**关键设计**：
+- ✅ 每个 topic 使用**独立的 `group_id`**（格式：`{base_group_id}-{topic_name}`）
+- ✅ 避免多个消费者在同一个 consumer group 内互相干扰
+- ✅ 防止频繁的 rebalance 和 offset 冲突
+- ✅ 每个消费者组独立管理自己的 offset，互不影响
+
+**为什么要使用独立的 group_id？**
+
+如果所有消费者使用相同的 group_id：
+```
+❌ 错误示例：所有消费者使用 "mygroup"
+- Kafka 认为它们是同一个消费者组
+- 触发分区重新分配（rebalance）
+- 可能读取到其他 topic 的历史 offset
+- 导致 "Fetch offset is out of range" 错误
+```
+
+使用独立的 group_id：
+```
+✅ 正确示例：每个 topic 有独立的消费者组
+- Consumer A: group_id = "mygroup-TopicA"
+- Consumer B: group_id = "mygroup-TopicB"
+- 每个消费者组独立管理 offset
+- 不会互相干扰，不会触发 rebalance
 ```
 
 ### 优势
@@ -47,6 +73,8 @@ Topic E → Consumer E (max_poll_records: 500)
 2. **并发拉取**：使用 `asyncio.gather` 并发从所有 topic 拉取消息
 3. **数据完整性**：确保所有 topic 的消息都能被消费
 4. **独立控制**：可以为不同 topic 设置不同的消费参数
+5. **避免 Rebalance**：独立的 consumer group 防止互相干扰
+6. **Offset 隔离**：每个 topic 的 offset 独立管理，不会冲突
 
 ## 配置方法
 
@@ -318,7 +346,16 @@ KAFKA_CONFIG = {
 
 ### Q4: 多消费者模式是否会导致重复消费？
 
-**A**: 不会。每个消费者使用相同的 `group_id`，但订阅不同的 topic，不会产生冲突。
+**A**: 不会。每个消费者使用**独立的 `group_id`**（格式：`{base_group_id}-{topic_name}`），完全隔离，不会产生冲突。
+
+### Q5: 为什么会出现 "Fetch offset is out of range" 错误？
+
+**A**: 如果多个消费者使用相同的 `group_id`，会导致：
+- 频繁的 rebalance（每启动一个消费者就触发一次）
+- Offset 被其他消费者覆盖
+- 消息丢失或越界
+
+**解决方案**：当前版本已修复，每个 topic 自动使用独立的 `group_id`。
 
 ## 迁移指南
 

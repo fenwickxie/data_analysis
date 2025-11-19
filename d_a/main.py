@@ -142,7 +142,16 @@ async def main():
         print(f"多消费者模式: {service.consumer._multi_consumer_mode}")
         if service.consumer._multi_consumer_mode:
             print(f"订阅的 topic 数量: {len(service.consumer._topic_consumers)}")
-        
+            for topic, consumer in service.consumer._topic_consumers.items():
+                assignment = consumer.assignment()
+                for tp in assignment:
+                    position = await consumer.position(tp)
+                    beginning = await consumer.beginning_offsets([tp])
+                    end = await consumer.end_offsets([tp])
+                    print(f"\n{topic} 分区 {tp.partition}:")
+                    print(f"  当前 offset: {position}")
+                    print(f"  可用范围: {beginning[tp]} - {end[tp]}")
+                    print(f"  剩余消息: {end[tp] - position}")
         iteration = 0
         while True:
             iteration += 1
