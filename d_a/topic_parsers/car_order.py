@@ -17,15 +17,16 @@ class CarOrderParser(ConfigBasedParser):
         重写窗口解析方法，实现枪号对齐
         
         订单数据的特殊处理：
-        - window_size=1，window_data 只包含最新一秒的订单列表
-        - 如果是订单聚合：window_data = [[{order1}, {order2}, ...]]
-        - 如果未聚合：window_data = [{order1}] 或 [{order1}, {order2}, ...]
-        - 需要按枪号对齐后返回
+        - window_size=2，保留2秒数据：上一秒（已完成）+ 当前秒（聚合中）
+        - 事件触发时，业务模块应处理上一秒已完成的聚合订单
+        - window_data = [[{order1}, {order2}], [{order3}]] 
+          - window_data[-2]: 上一秒已完成的聚合订单（应处理）
+          - window_data[-1]: 当前秒聚合中的订单（不应处理）
         
         Args:
             window_data: 窗口内的原始数据列表
-                - 订单聚合：[[{order1}, {order2}]]（外层列表只有1个元素）
-                - 未聚合：[{order1}] 或 [{order1}, {order2}]
+                - 正常情况：[[order1, order2], [order3]] （2条记录）
+                - 初始情况：[[order1]] （只有1条记录，第一次触发）
             
         Returns:
             dict: 对齐后的数据，格式为：
@@ -41,8 +42,14 @@ class CarOrderParser(ConfigBasedParser):
         if not window_data:
             return {}
         
-        # 获取最新一条数据（window_size=1）
-        latest_data = window_data[-1] if window_data else None
+        # 获取应处理的订单数据
+        # - 如果有2条：取倒数第二条（上一秒已完成的聚合订单）
+        # - 如果只有1条：取最后一条（初始情况或服务刚启动）
+        if len(window_data) >= 2:
+            latest_data = window_data[-2]  # 上一秒已完成的聚合订单
+        else:
+            latest_data = window_data[-1]  # 初始情况
+            
         return latest_data
         # if not latest_data:
         #     return {}

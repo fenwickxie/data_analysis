@@ -6,7 +6,7 @@
 """
 
 import logging
-from .config import TOPIC_TO_MODULES, MODULE_TO_TOPICS
+from .config import MODULE_OUTPUT_TOPICS, TOPIC_TO_MODULES, MODULE_TO_TOPICS
 from .errors import handle_error
 from .dispatcher import DataDispatcher
 
@@ -41,20 +41,29 @@ class ServiceBase:
             logging.info(f"订阅 {len(self.topics)} 个 topics")
 
         # Topic数据提取策略映射
-        # 列表格式topic：直接列表 [{'stationId': ...}, ...]
+        # 列表格式topic：直接列表 [{'stationId': ...}, ...]，如 SCHEDULE-STATION-PARAM
         self._list_format_topics = {"SCHEDULE-STATION-PARAM"}
 
         # 窗口格式topic：包含窗口数据的字典 {'realTimeData': [...]} 或 {'fee': [...]}
+        # 如 SCHEDULE-STATION-REALTIME-DATA、 SCHEDULE-CAR-PRICE
         # 需要按场站分组并排序
         self._window_format_topics = {
             "SCHEDULE-STATION-REALTIME-DATA",  # realTimeData
             "SCHEDULE-CAR-PRICE",  # fee
         }
 
-        # 全局数据topic：无stationId的全局配置数据
+        # 全局数据topic：无stationId的全局配置数据，如 SCHEDULE-ENVIRONMENT-CALENDAR
         self._global_data_topics = {"SCHEDULE-ENVIRONMENT-CALENDAR"}
-        # 输出topic集合
-        self._output_topics = {"SCHEDULE-LOAD-PREDICTION"}
+
+        # 其它格式topic：单条数据 {'stationId': ..., ...}，如 SCHEDULE-CAR-ORDER、SCHEDULE-DEVICE-STORAGE、SCHEDULE-DEVICE-HOST-DCDC
+        self._other_format_topics = {
+            "SCHEDULE-CAR-ORDER",
+            "SCHEDULE-DEVICE-STORAGE",
+            "SCHEDULE-DEVICE-HOST-DCDC",
+        }
+
+        # 模型输出格式topic集合
+        self._output_topics = set(MODULE_OUTPUT_TOPICS.values())
 
         # 窗口数据key映射（用于从字典中提取数据列表）
         self._window_data_keys = {
@@ -184,9 +193,27 @@ class ServiceBase:
     @staticmethod
     def _extract_output_format(value):
         """
-        提取输出格式数据：{'batch_id': 'batch_1763112363623_2980700020096', 'module': 'load_prediction', 'results': [{'predicted_load': [25.015590419670175, 29.18676197267237, 26.610251686341627, 20.972859424021763, 18.64837065807092, 18.451426688502522, 18.028758154486244, 18.77851120096669, 20.31007351288126, 23.734521936301125, 24.750153727642743, 30.04224424756063, 30.50005881150041, 30.14793448980103, 29.571786846814057, 21.11390886248814, 29.999871314055085, 32.163665228815645, 14.210197621466953, 19.568502845489064, 24.86399270768177, 25.4425587506667, 29.82325265710602, 18.337728090106644], 'predicted_time': ['2025-11-12 21:00:00', '2025-11-12 22:00:00', '2025-11-12 23:00:00', '2025-11-13 00:00:00', '2025-11-13 01:00:00', '2025-11-13 02:00:00', '2025-11-13 03:00:00', '2025-11-13 04:00:00', '2025-11-13 05:00:00', '2025-11-13 06:00:00', '2025-11-13 07:00:00', '2025-11-13 08:00:00', '2025-11-13 09:00:00', '2025-11-13 10:00:00', '2025-11-13 11:00:00', '2025-11-13 12:00:00', '2025-11-13 13:00:00', '2025-11-13 14:00:00', '2025-11-13 15:00:00', '2025-11-13 16:00:00', '2025-11-13 17:00:00', '2025-11-13 18:00:00', '2025-11-13 19:00:00', '2025-11-13 20:00:00'], 'station_id': '1173980655843938304'},...], 'stations_count': 3, 'timestamp': 1763112692.5043597}
+        提取输出格式数据：
+        {
+            'batch_id': 'batch_1763112363623_2980700020096',
+            'module': 'load_prediction',
+            'results':
+            [
+                {
+                    'predicted_load': [25.015590419670175, 29.18676197267237, 26.610251686341627, 20.972859424021763, 18.64837065807092, 18.451426688502522, 18.028758154486244, 18.77851120096669, 20.31007351288126, 23.734521936301125, 24.750153727642743, 30.04224424756063, 30.50005881150041, 30.14793448980103, 29.571786846814057, 21.11390886248814, 29.999871314055085, 32.163665228815645, 14.210197621466953, 19.568502845489064, 24.86399270768177, 25.4425587506667, 29.82325265710602, 18.337728090106644],
+                    'predicted_time': ['2025-11-12 21:00:00', '2025-11-12 22:00:00', '2025-11-12 23:00:00', '2025-11-13 00:00:00', '2025-11-13 01:00:00', '2025-11-13 02:00:00', '2025-11-13 03:00:00', '2025-11-13 04:00:00', '2025-11-13 05:00:00', '2025-11-13 06:00:00', '2025-11-13 07:00:00', '2025-11-13 08:00:00', '2025-11-13 09:00:00', '2025-11-13 10:00:00', '2025-11-13 11:00:00', '2025-11-13 12:00:00', '2025-11-13 13:00:00', '2025-11-13 14:00:00', '2025-11-13 15:00:00', '2025-11-13 16:00:00', '2025-11-13 17:00:00', '2025-11-13 18:00:00', '2025-11-13 19:00:00', '2025-11-13 20:00:00'],
+                    'station_id': '1173980655843938304'
+                    },
+                {
 
-        示例：SCHEDULE-LOAD-PREDICTION
+                    },
+                ...
+            ],
+            'stations_count': 3,
+            'timestamp': 1763112692.5043597
+        }
+
+        示例：MODULE-OUTPUT-LOAD-PREDICTION
 
         Args:
             value: 原始数据（dict）
@@ -220,7 +247,7 @@ class ServiceBase:
         """
         return [("__global__", value)]
 
-    def extract_station_data(self, topic, value):
+    def extract_station_data(self, topic, value) -> list:
         """
         从消息中提取场站数据列表
 
@@ -268,7 +295,12 @@ class ServiceBase:
                 if isinstance(value, dict):
                     return self._extract_output_format(value)
                 return []
-            # 策略4：单条格式（默认）
+            # 策略5：单条格式
+            if topic in self._other_format_topics:
+                if isinstance(value, dict):
+                    return self._extract_single_format(value)
+                return []
+            # 策略6：未声明的 topic
             # 兼容处理：自动识别未预先声明的 topic
             if isinstance(value, list):
                 # 未声明但是列表格式，尝试作为列表格式处理

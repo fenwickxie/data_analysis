@@ -88,7 +88,7 @@ TOPIC_DETAIL = {
         'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
         'frequency': '1秒1次',
         'modules': ['operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
-        'window_size': 1
+        'window_size': 2  # 需要保留2秒数据：当前秒（聚合中）+ 上一秒（已完成，待处理）
     },
     'SCHEDULE-CAR-PRICE': {
         'fields': ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee'],

@@ -77,6 +77,7 @@ class AsyncDataAnalysisService(ServiceBase):
         self._station_stop_flags = {}  # 每个场站的停止标志
         self._station_data_events = {}  # 每个场站的数据就绪事件
         self._station_batch_info = {}  # 场站的批次信息: {station_id: batch_id}
+        self._station_initialized = {}  # 场站是否已初始化（首次数据完整）: {station_id: bool}
         self._global_data_cache = {}  # 缓存全局数据: {topic: latest_data}
         self._main_task = None  # 主循环任务
         self._stop_event = asyncio.Event()  # 停止事件
@@ -111,9 +112,39 @@ class AsyncDataAnalysisService(ServiceBase):
             value_str = msg.value.decode("utf-8")
             value = json.loads(value_str)
 
-            # 使用基类方法提取场站数据,并处理全局数据广播,创建场站任务,触发数据就绪事件
+            # 使用基类方法提取场站数据
             station_data_list = self.extract_station_data(topic, value)
+            
+            return await self._process_message_with_parsed_data(
+                msg, value, station_data_list, batch_id
+            )
 
+        except Exception as exc:
+            handle_error(
+                exc,
+                context=f"处理消息 topic={topic}, partition={msg.partition}, offset={msg.offset}",
+            )
+            return False, []
+
+    async def _process_message_with_parsed_data(
+        self, msg, value, station_data_list, batch_id=None
+    ):
+        """
+        使用预解析的数据处理单个消息（避免重复解析JSON）
+
+        Args:
+            msg: Kafka消息对象
+            value: 已解析的JSON值
+            station_data_list: 已提取的场站数据列表
+            batch_id: 批次ID（可选）
+
+        Returns:
+            tuple: (是否成功, 场站ID列表)
+        """
+        topic = msg.topic
+        kafka_timestamp = msg.timestamp / 1000.0
+
+        try:
             if not station_data_list:
                 logging.debug(f"消息中没有提取到场站数据: topic={topic}")
                 return False, []
@@ -129,21 +160,7 @@ class AsyncDataAnalysisService(ServiceBase):
                     if station_id == "__global__":
                         # 1. 缓存全局数据（最新的）
                         self._global_data_cache[topic] = station_data
-
-                        # 2. 广播到所有已知场站
-                        known_stations = list(self._station_tasks.keys())
-                        if known_stations:
-                            logging.info(
-                                f"广播全局数据 topic={topic} 到 {len(known_stations)} 个场站"
-                            )
-                            for sid in known_stations:
-                                self.dispatcher.update_topic_data(
-                                    sid, topic, station_data, kafka_timestamp
-                                )
-                                if sid in self._station_data_events:
-                                    self._station_data_events[sid].set()
-                        else:
-                            logging.info(f"全局数据已缓存 topic={topic}，等待场站注册")
+                        logging.info(f"全局数据已缓存 topic={topic}，等待场站注册")
                         continue
 
                     # 处理场站数据
@@ -176,12 +193,27 @@ class AsyncDataAnalysisService(ServiceBase):
 
                         # 创建场站任务（此时全局数据已就绪）
                         self._create_station_task(station_id)
+                        # 标记场站为未初始化（需要等待关键数据完整）
+                        self._station_initialized[station_id] = False
 
                     # 根据 dispatcher 返回值决定是否触发数据就绪事件
                     # 订单类 topic：只有进入新的一秒时才触发（上一秒订单已聚合完成）
                     # 其他 topic：每次更新都触发
                     if should_trigger and station_id in self._station_data_events:
-                        self._station_data_events[station_id].set()
+                        # 数据完整性检查：场站初始化后直接触发，初始化前需检查关键数据是否完整
+                        if self._station_initialized.get(station_id, False):
+                            # 已初始化，直接触发
+                            self._station_data_events[station_id].set()
+                        else:
+                            # 未初始化，检查是否有足够的数据
+                            if self._check_station_data_ready(station_id):
+                                # 关键数据已完整，标记为已初始化并触发
+                                self._station_initialized[station_id] = True
+                                self._station_data_events[station_id].set()
+                                logging.info(f"场站 {station_id} 首次数据完整，开始处理")
+                            else:
+                                # 数据不完整，不触发（等待更多数据）
+                                logging.debug(f"场站 {station_id} 数据尚未完整，等待更多topic数据")
 
                 except Exception as exc:
                     handle_error(
@@ -203,6 +235,56 @@ class AsyncDataAnalysisService(ServiceBase):
                 context=f"处理消息 topic={topic}, partition={msg.partition}, offset={msg.offset}",
             )
             return False, []
+
+    def _check_station_data_ready(self, station_id):
+        """
+        检查场站的关键数据是否完整（用于首次触发判断）
+
+        策略：
+        1. 如果指定了 module_name，检查该模块需要的所有 topic 是否都有数据
+        2. 如果没有指定 module_name，检查是否至少有 50% 的 topic 有数据
+        3. 可以根据业务需求调整阈值
+
+        Args:
+            station_id: 场站ID
+
+        Returns:
+            bool: True 表示数据完整可以开始处理，False 表示还需等待
+        """
+        if station_id not in self.dispatcher.data_cache:
+            return False
+
+        if self.module_name:
+            # 指定了模块，检查该模块需要的所有 topic
+            required_topics = MODULE_TO_TOPICS.get(self.module_name, [])
+            if not required_topics:
+                return True  # 没有依赖 topic，直接返回 True
+
+            # 检查每个必需的 topic 是否有数据
+            available_count = 0
+            for topic in required_topics:
+                window = self.dispatcher.get_topic_window(station_id, topic)
+                if window:
+                    available_count += 1
+
+            # 要求所有必需的 topic 都有数据（100% 完整）
+            data_ready = available_count == len(required_topics)
+            
+            if not data_ready:
+                logging.debug(
+                    f"场站 {station_id} 数据未完整: {available_count}/{len(required_topics)} 个topic有数据"
+                )
+            
+            return data_ready
+        else:
+            # 没有指定模块，使用宽松策略：至少 50% 的已订阅 topic 有数据
+            station_topics = self.dispatcher.data_cache[station_id]
+            total_topics = len(self.topics)
+            available_count = sum(1 for topic in self.topics if station_topics.get(topic))
+
+            # 至少 50% 的 topic 有数据才触发
+            threshold = max(1, total_topics // 2)
+            return available_count >= threshold
 
     def _create_station_task(self, station_id):
         """
@@ -363,13 +445,18 @@ class AsyncDataAnalysisService(ServiceBase):
                 # 为这一批消息生成批次ID
                 batch_id = f"batch_{int(time.time() * 1000)}_{id(batch)}"
 
-                # 收集所有场站ID（第一遍扫描）
+                # 第一遍：解析所有消息并缓存结果（避免重复解析JSON）
+                parsed_messages = []  # [(msg, value, station_data_list), ...]
                 all_station_ids = []
+                
                 for msg in batch:
                     try:
                         value_str = msg.value.decode("utf-8")
                         value = json.loads(value_str)
                         station_data_list = self.extract_station_data(msg.topic, value)
+                        
+                        # 缓存解析结果
+                        parsed_messages.append((msg, value, station_data_list))
 
                         if station_data_list:
                             # 提取场站列表（排除全局数据）
@@ -380,7 +467,9 @@ class AsyncDataAnalysisService(ServiceBase):
                             ]
                             all_station_ids.extend(station_ids)
                     except Exception as exc:
-                        logging.error(f"扫描消息场站ID失败: {exc}")
+                        logging.error(f"解析消息失败: {exc}")
+                        # 即使解析失败，也要保留消息以便后续错误处理
+                        parsed_messages.append((msg, None, None))
 
                 # 1. 先创建批次（如果有场站数据且配置了上传回调）
                 if all_station_ids and self._batch_upload_handler:
@@ -395,9 +484,16 @@ class AsyncDataAnalysisService(ServiceBase):
                         f"创建批次 {batch_id}，包含 {len(unique_stations)} 个场站"
                     )
 
-                # 2. 再处理所有消息（此时批次已存在）
-                for msg in batch:
-                    await self._process_message(msg, batch_id)
+                # 2. 再处理所有消息（使用缓存的解析结果）
+                for msg, value, station_data_list in parsed_messages:
+                    if value is None or station_data_list is None:
+                        # 跳过解析失败的消息
+                        continue
+                    
+                    # 使用预解析的数据进行处理
+                    await self._process_message_with_parsed_data(
+                        msg, value, station_data_list, batch_id
+                    )
 
                 # 检查是否需要提交offset
                 if self.offset_manager.should_commit():
@@ -613,30 +709,8 @@ class DataAnalysisService(ServiceBase):
                                 try:
                                     # 处理全局数据
                                     if station_id == "__global__":
-                                        # 1. 缓存全局数据（最新的）
                                         self._global_data_cache[topic] = station_data
-
-                                        # 2. 广播到所有已知场站
-                                        known_stations = list(
-                                            self._station_threads.keys()
-                                        )
-                                        if known_stations:
-                                            logging.info(
-                                                f"广播全局数据 topic={topic} 到 {len(known_stations)} 个场站"
-                                            )
-                                            for sid in known_stations:
-                                                self.dispatcher.update_topic_data(
-                                                    sid,
-                                                    topic,
-                                                    station_data,
-                                                    kafka_timestamp,
-                                                )
-                                                if sid in self._station_data_events:
-                                                    self._station_data_events[sid].set()
-                                        else:
-                                            logging.info(
-                                                f"全局数据已缓存 topic={topic}，等待场站注册"
-                                            )
+                                        logging.info(f"全局数据已缓存 topic={topic}，等待场站注册")
                                         continue
 
                                     # 处理场站数据

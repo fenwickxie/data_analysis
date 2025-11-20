@@ -53,18 +53,18 @@ for module_name, topic_name in MODULE_OUTPUT_TOPICS.items():
 class DataDispatcher:
     """
     数据分发与依赖处理核心类。
-    
+
     该类负责管理多场站数据窗口缓存，处理模块间依赖关系，
     并将多topic数据整合为各业务模块所需格式。支持多种数据补全策略，
     并提供动态配置更新功能。
-    
+
     主要功能：
     - 多场站数据窗口管理
     - 数据补全/插值处理
     - 模块间依赖处理
     - 动态配置热更新
     - 数据清理和过期处理
-    
+
     Attributes:
         data_cache (dict): 多场站窗口缓存，格式为 {station_id: {topic: deque[(data, ts)]}}
         data_expire_seconds (int): 数据过期时间(秒)
@@ -96,10 +96,10 @@ class DataDispatcher:
     def __init__(self, data_expire_seconds=600):
         """
         初始化数据分发器，设置解析器和缓存参数。
-        
+
         创建分发器实例时会初始化所有业务模块解析器，
         设置数据缓存结构和默认补全策略。
-        
+
         Args:
             data_expire_seconds (int, optional): 数据过期时间(秒)，默认为600。
                 超过此时间未更新的场站数据将被自动清理。
@@ -120,79 +120,90 @@ class DataDispatcher:
         self.data_cache = {}
         self.data_expire_seconds = data_expire_seconds
         self.lock = threading.RLock()
-        
+
         # Topic更新策略映射
         # 订单类topic：需要按秒聚合
-        self._order_topics = {'SCHEDULE-CAR-ORDER'}
+        self._order_topics = {"SCHEDULE-CAR-ORDER"}
         # 窗口类topic：批量替换（raw_data是list）
-        self._window_topics = {'SCHEDULE-STATION-REALTIME-DATA'}
-        # 其他topic使用默认的单条追加策略
+        self._window_topics = {"SCHEDULE-STATION-REALTIME-DATA"}
+        # 模型输出类topic：raw_data是dict，追加到窗口
+        self._output_topics = set(MODULE_OUTPUT_TOPICS.values())
 
     def _update_order_topic(self, station_id, topic, raw_data, timestamp):
         """
         更新订单类 topic（如 SCHEDULE-CAR-ORDER）
-        
+
         订单特点：
-        - window_size=1，只保留最新一秒的数据
+        - window_size=2，保留2秒数据（上一秒已完成 + 当前秒聚合中）
         - 同一秒可能有多个订单（不同枪号）
         - 需要聚合同一秒的所有订单
-        
+
+        工作流程：
+        1. 同一秒内：聚合订单到 deque[-1]，不触发事件
+        2. 进入新的一秒：
+           - 触发事件（通知业务模块处理 deque[-2]，即上一秒已完成的聚合数据）
+           - append 新订单到 deque（成为 deque[-1]）
+           - 旧数据自动保留在 deque[-2]，直到再次进入新的一秒
+
         Args:
             station_id (str): 场站ID
             topic (str): topic名称
             raw_data (dict): 单条订单数据
             timestamp (float): Kafka消息时间戳（秒）
-            
+
         Returns:
             bool: 是否应该触发数据就绪事件
                   - True: 时间戳变化，进入新的一秒，上一秒的订单已聚合完成
                   - False: 同一秒内聚合中，不应触发事件
         """
         should_trigger = False
-        
+
         if self.data_cache[station_id][topic]:
             # 检查最后一条数据的时间戳（秒级）
             last_data, last_ts = self.data_cache[station_id][topic][-1]
-            
+
             # 如果时间戳相同（秒级），聚合数据
             if int(last_ts) == int(timestamp):
                 # 将 last_data 转换为列表（如果还不是）
                 if not isinstance(last_data, list):
                     last_data = [last_data]
-                
+
                 # 添加新订单
                 last_data.append(raw_data)
-                
+
                 # 更新最后一条记录
                 self.data_cache[station_id][topic][-1] = (last_data, timestamp)
-                
+
                 # 同一秒内聚合，不触发事件
                 should_trigger = False
             else:
                 # 时间戳不同，说明进入新的一秒
-                # 添加新记录（包装为列表）
-                self.data_cache[station_id][topic].append(([raw_data], timestamp))
-                
                 # 上一秒的订单已聚合完成，应该触发事件处理上一秒的数据
+                # 注意：必须先设置触发标志，再添加新数据
+                # 因为 maxlen=1 的 deque 会在 append 时自动删除旧数据
                 should_trigger = True
+                
+                # 添加新记录（包装为列表）
+                # 此操作会删除旧数据，但触发标志已设置，业务模块会处理旧数据
+                self.data_cache[station_id][topic].append(([raw_data], timestamp))
         else:
             # 窗口为空，初始化（包装为列表）
             self.data_cache[station_id][topic].append(([raw_data], timestamp))
-            
+
             # 第一条订单，触发事件（可能是唯一的订单）
             should_trigger = True
-        
+
         return should_trigger
-    
+
     def _update_window_topic(self, station_id, topic, raw_data, timestamp):
         """
         更新窗口类 topic（如 SCHEDULE-STATION-REALTIME-DATA）
-        
+
         窗口特点：
         - window_size > 1，保留多条历史数据
         - raw_data 是列表，包含多条记录（已按时间排序）
         - 直接替换整个窗口
-        
+
         Args:
             station_id (str): 场站ID
             topic (str): topic名称
@@ -203,16 +214,16 @@ class DataDispatcher:
         self.data_cache[station_id][topic].clear()
         for item in raw_data:
             self.data_cache[station_id][topic].append((item, timestamp))
-    
+
     def _update_single_topic(self, station_id, topic, raw_data, timestamp):
         """
         更新单条类 topic（如 SCHEDULE-STATION-PARAM, SCHEDULE-CAR-PRICE）
-        
+
         单条特点：
         - window_size=1，只保留最新数据
         - raw_data 是单个 dict
         - 直接追加（deque 自动处理溢出）
-        
+
         Args:
             station_id (str): 场站ID
             topic (str): topic名称
@@ -220,22 +231,37 @@ class DataDispatcher:
             timestamp (float): Kafka消息时间戳（秒）
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
-    
+
+    def _update_output_topic(self, station_id, topic, raw_data, timestamp):
+        """
+        更新模型输出数据 topic（如 MODULE_OUTPUT_TOPICS 中定义的 topic）
+
+        Args:
+            station_id (str): 场站ID
+            topic (str): topic名称
+            raw_data (dict): 模型输出数据
+            timestamp (float): Kafka消息时间戳（秒）
+        Returns:
+
+        """      
+        self.data_cache[station_id][topic].append((raw_data, timestamp))
+
     def update_topic_data(self, station_id, topic, raw_data, timestamp=None):
         """
         更新指定场站、topic的数据窗口到缓存中。
-        
+
         根据 topic 类型选择对应的更新策略：
         1. 订单类（SCHEDULE-CAR-ORDER）：同一秒聚合多个订单
         2. 窗口类（SCHEDULE-STATION-REALTIME-DATA）：批量替换窗口数据
-        3. 单条类（其他 topic，如 SCHEDULE-STATION-PARAM, SCHEDULE-CAR-PRICE）：直接追加最新数据
-        
+        3. 模型输出类（MODULE_OUTPUT_TOPICS 中的 topic）：追加最新输出数据
+        4. 单条类（其他 topic，如 SCHEDULE-STATION-PARAM, SCHEDULE-CAR-PRICE）：直接追加最新数据
+
         Args:
             station_id (str): 场站ID
             topic (str): topic名称
             raw_data (dict or list): 原始数据（单条dict或窗口数据list）
             timestamp (float, optional): Kafka消息时间戳（秒），默认使用当前时间
-            
+
         Returns:
             bool: 是否应该触发数据就绪事件
                   - True: 数据已完整，可以触发事件通知业务模块
@@ -251,24 +277,32 @@ class DataDispatcher:
                 if topic not in self.data_cache[station_id]:
                     win_size = TOPIC_DETAIL.get(topic, {}).get("window_size", 1)
                     self.data_cache[station_id][topic] = deque(maxlen=win_size)
-                
+
                 # 使用Kafka时间戳或当前时间
                 ts = timestamp if timestamp is not None else time.time()
-                
+
                 # 根据 topic 类型选择更新策略
                 if topic in self._order_topics:
                     # 订单类：聚合同一秒的订单，返回是否应该触发
-                    should_trigger = self._update_order_topic(station_id, topic, raw_data, ts)
+                    should_trigger = self._update_order_topic(
+                        station_id, topic, raw_data, ts
+                    )
                     return should_trigger
                 elif topic in self._window_topics:
                     # 窗口类：批量替换（raw_data 必须是列表）
                     self._update_window_topic(station_id, topic, raw_data, ts)
                     return True  # 窗口数据完整，可以触发
+
+                elif topic in self._output_topics:
+                    # 模型输出类topic：raw_data是dict，追加到窗口
+                    self._update_output_topic(station_id, topic, raw_data, ts)
+                    return True  # 模型输出数据完整，可以触发
+
                 else:
                     # 单条类：直接追加
                     self._update_single_topic(station_id, topic, raw_data, ts)
                     return True  # 单条数据完整，可以触发
-                
+
         except Exception as e:
             handle_error(
                 DispatcherError(e),
@@ -288,16 +322,16 @@ class DataDispatcher:
     def get_module_input(self, station_id, module):
         """
         整合该场站所有topic窗口数据，组装为模块输入（在这里完成解析）。
-        
+
         说明：
         - 对于事件驱动模式，当最快频率topic更新时触发处理
         - 慢速topic自动使用其最新缓存数据（不管数据新旧）
         - 只需确保topic有数据即可，不检查数据新鲜度
-        
+
         Args:
             station_id (str): 场站ID
             module (str): 模块名称
-            
+
         Returns:
             dict: 模块输入数据，包含：
                 - 业务字段：由各topic parser解析生成
@@ -312,37 +346,39 @@ class DataDispatcher:
                 # 检查场站ID是否存在于缓存中
                 if station_id not in self.data_cache:
                     return None
-                
+
                 # 初始化输入数据字典，包含场站ID
-                input_data = {'stationId': station_id}
-                
+                input_data = {"stationId": station_id}
+
                 # 数据可用性元信息（只关注是否有数据）
                 data_quality = {
-                    'available_topics': [],     # 有数据的topic
-                    'missing_topics': [],       # 无数据的topic
-                    'total_topics': 0,
-                    'availability_ratio': 0.0   # 数据可用率
+                    "available_topics": [],  # 有数据的topic
+                    "missing_topics": [],  # 无数据的topic
+                    "total_topics": 0,
+                    "availability_ratio": 0.0,  # 数据可用率
                 }
-                
-                # 处理模块所需的topic数据
+
+                # 处理模块所需的topic数据，包含依赖的其他模块输出（通过Kafka topic获取）
                 required_topics = MODULE_TO_TOPICS.get(module, [])
-                data_quality['total_topics'] = len(required_topics)
-                
+                data_quality["total_topics"] = len(required_topics)
+
                 for topic in required_topics:
                     # 获取指定topic的窗口数据
                     window = self.get_topic_window(station_id, topic)
-                    
+
                     if window:
                         # 有数据即可（不管是最新的还是缓存的）
-                        data_quality['available_topics'].append(topic)
-                        
+                        data_quality["available_topics"].append(topic)
+
                         # 调用topic parser的parse_window方法
                         # 各topic parser可以实现自己的窗口数据处理逻辑
                         parser = TOPIC_PARSER_MAP.get(topic)
                         if parser:
                             try:
                                 # 解析窗口数据并更新到输入数据中
-                                parsed_data = parser.parse_window(window) # 完成枪号对齐、插值、格式化等所有处理
+                                parsed_data = parser.parse_window(
+                                    window
+                                )  # 完成枪号对齐、插值、格式化等所有处理
                                 if parsed_data:
                                     input_data.update(parsed_data)
                             except Exception as e:
@@ -353,56 +389,25 @@ class DataDispatcher:
                                 )
                     else:
                         # 窗口为空，没有任何数据
-                        data_quality['missing_topics'].append(topic)
-                        
+                        data_quality["missing_topics"].append(topic)
+
                         # 添加空列表
                         fields = TOPIC_DETAIL.get(topic, {}).get("fields", [])
                         for field in fields:
-                            if field != 'stationId':
+                            if field != "stationId":
                                 input_data[field] = []
-                        input_data['sendTime'] = []
-                
-                # 依赖其他模块输出（通过Kafka topic获取）
-                deps = MODULE_DEPENDENCIES.get(module, [])
-                for dep in deps:
-                    # 获取依赖模块的输出topic
-                    output_topic = MODULE_OUTPUT_TOPICS.get(dep)
-                    if not output_topic:
-                        continue
-                    dep_window = self.get_topic_window(station_id, output_topic)
-                    if not dep_window:
-                        continue
-                    parser = TOPIC_PARSER_MAP.get(output_topic)
-                    try:
-                        if parser and hasattr(parser, 'parse_window'):
-                            # 使用parse_window处理窗口数据
-                            parsed_values = parser.parse_window(dep_window)
-                        else:
-                            # 回退到逐条解析
-                            parsed_values = (
-                                [parser.parse(d) for d in dep_window] if parser else list(dep_window)
-                            )
-                    except Exception as e:
-                        handle_error(
-                            DispatcherError(e),
-                            context=f"依赖topic解析 module={module}, dep={dep}, topic={output_topic}, station_id={station_id}",
-                        )
-                        parsed_values = []
-                    if not parsed_values:
-                        continue
-                    
-                    input_data[f"{dep}_output"] = parsed_values
-                
+                        input_data["sendTime"] = []
+
                 # 计算数据可用率
-                available_count = len(data_quality['available_topics'])
-                total_count = data_quality['total_topics']
-                data_quality['availability_ratio'] = (
+                available_count = len(data_quality["available_topics"])
+                total_count = data_quality["total_topics"]
+                data_quality["availability_ratio"] = (
                     available_count / total_count if total_count > 0 else 0.0
                 )
-                
+
                 # 将数据可用性信息添加到返回结果（业务模块可根据此信息决定是否处理）
-                input_data['_data_quality'] = data_quality
-                
+                input_data["_data_quality"] = data_quality
+
                 # 调用模块解析器（如果需要进一步处理）
                 try:
                     return self.parsers[module].parse(input_data)
@@ -412,7 +417,7 @@ class DataDispatcher:
                         context=f"模块解析 module={module}, station_id={station_id}",
                     )
                     return input_data  # 解析失败时返回原始input_data
-                    
+
         except Exception as e:
             handle_error(
                 DispatcherError(e),
@@ -426,7 +431,8 @@ class DataDispatcher:
             if station_id not in self.data_cache:
                 return {}
             return {
-                m: self.get_module_input(station_id, module=m) for m in self.parsers.keys()
+                m: self.get_module_input(station_id, module=m)
+                for m in self.parsers.keys()
             }
 
     def clean_expired(self):

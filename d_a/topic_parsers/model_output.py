@@ -21,13 +21,16 @@ class ModelOutputParser(ParserBase):
         self.module_name = module_name or "unknown"
 
     def parse(self, raw_data):
-        """保持原始结构，必要时增加来源标记。"""
+        """
+        保持原始结构，必要时增加来源标记。
+
+        """
         if raw_data is None:
             return {}
         if isinstance(raw_data, dict):
-            # 返回浅拷贝，避免共享引用被下游修改
-            return dict(raw_data)
-        return {
-            "value": raw_data,
-            "source_module": self.module_name,
-        }
+            return raw_data
+    def parse_window(self, window_data):
+        """
+        解析窗口数据，保持原始结构，必要时增加来源标记。
+        """
+        return self.parse(window_data[-1])
