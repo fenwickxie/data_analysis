@@ -14,4 +14,6 @@ from ..parser_base import ParserBase
 class OperationOptimizationParser(ParserBase):
     def parse(self, raw_data):
         # 解析运行优化及配置模块数据
-        return raw_data
+        car_order=raw_data.get('car_order', [])
+        device_storage=raw_data.get('device_storage', [])
+        return car_order, device_storage

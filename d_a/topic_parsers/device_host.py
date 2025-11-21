@@ -57,65 +57,58 @@ class DeviceHostDCDCParser(ConfigBasedParser):
     
     def parse_window(self, window_data):
         """
-        重写窗口解析方法，实现模块对齐
+        解析 DCDC 主机设备窗口数据（从聚合字典读取）
         
         Args:
-            window_data: 窗口内的原始数据列表
+            window_data: [host_dict]，其中 host_dict = {
+                'host_id_1': (raw_data1, timestamp1),
+                'host_id_2': (raw_data2, timestamp2),
+                ...
+            }
             
         Returns:
-            dict: 对齐后的数据，格式为：
-            {
-                'moduleIndex': [0, 1, 2, ...],  # 统一的模块索引
-                'dcWorkStatus': [['00', '01', ...], ['00', '00', ...], ...],
-                'dcPower': [[3.0, 15.0, ...], [2.0, 10.0, ...], ...],
-                'sendTime': ['2025-11-04 09:00:00', ...],
-            }
+            list: 所有 DCDC 主机设备的数据列表，格式为：
+            [
+                {
+                    'hostCode': 'H001',
+                    'moduleIndex': [0, 1, 2, ...],
+                    'dcWorkStatus': ['00', '01', '00', ...],
+                    'dcPower': [3.0, 15.0, 30.0, ...]
+                },
+                {
+                    'hostCode': 'H002',
+                    'moduleIndex': [0, 1, 2, ...],
+                    'dcWorkStatus': ['01', '01', '00', ...],
+                    'dcPower': [5.0, 20.0, 35.0, ...]
+                },
+                ...
+            ]
         """
-        if not window_data:
-            return {}
+        if not window_data or not isinstance(window_data, list) or not window_data[0]:
+            return None
         
-        # 第一步：解析所有数据
-        parsed_list = []
-        for raw_data in window_data:
+        # 获取 DCDC 主机聚合字典
+        host_dict = window_data[0]
+        
+        if not isinstance(host_dict, dict):
+            return None
+        
+        # 按 hostCode 排序（保证顺序稳定）
+        sorted_hosts = sorted(host_dict.items(), key=lambda x: x[0])
+        
+        # 组装结果列表
+        result = []
+        
+        for host_id, (raw_data, timestamp) in sorted_hosts:
+            # 解析单个主机的数据
             parsed = self.parse(raw_data)
-            parsed_list.append({
-                'sendTime': raw_data.get('sendTime', ''),
-                'parsed': parsed
-            })
+            if parsed:
+                # 确保包含 hostCode
+                if 'hostCode' not in parsed:
+                    parsed['hostCode'] = host_id
+                result.append(parsed)
         
-        # 第二步：找出最大模块数
-        max_modules = 0
-        for item in parsed_list:
-            if item['parsed'] and 'moduleIndex' in item['parsed']:
-                max_modules = max(max_modules, len(item['parsed']['moduleIndex']))
-        
-        if max_modules == 0:
-            return super().parse_window(window_data)
-        
-        # 第三步：对齐数据
-        result = {
-            'sendTime': [item['sendTime'] for item in parsed_list],
-            'moduleIndex': list(range(max_modules))
-        }
-        
-        # 对齐各字段
-        for field in ['dcWorkStatus', 'dcPower']:
-            result[field] = []
-            for item in parsed_list:
-                if item['parsed'] and field in item['parsed']:
-                    values = item['parsed'][field]
-                    # 补齐到最大模块数
-                    padded_values = values + [None] * (max_modules - len(values))
-                    result[field].append(padded_values[:max_modules])
-                else:
-                    # 没有数据，填充 None
-                    result[field].append([None] * max_modules)
-        
-        # hostCode 通常是单值
-        if parsed_list and parsed_list[0]['parsed']:
-            result['hostCode'] = parsed_list[0]['parsed'].get('hostCode')
-        
-        return result
+        return {"device_host_dcdc": result}
 
 
 class DeviceHostACDCParser(ConfigBasedParser):
@@ -144,3 +137,48 @@ class DeviceHostACDCParser(ConfigBasedParser):
             parsed_data['acPower'] = raw_data['acPower']
         
         return parsed_data if parsed_data else None
+    
+    def parse_window(self, window_data):
+        """
+        解析 ACDC 主机设备窗口数据（从聚合字典读取）
+        
+        Args:
+            window_data: [host_dict]，其中 host_dict = {
+                'host_id_1': (raw_data1, timestamp1),
+                'host_id_2': (raw_data2, timestamp2),
+                ...
+            }
+            
+        Returns:
+            list: 所有 ACDC 主机设备的数据列表，格式为：
+            [
+                {'hostCode': 'H001', 'acPower': 100.5},
+                {'hostCode': 'H002', 'acPower': 200.3},
+                ...
+            ]
+        """
+        if not window_data or not isinstance(window_data, list) or not window_data[0]:
+            return None
+        
+        # 获取 ACDC 主机聚合字典
+        host_dict = window_data[0]
+        
+        if not isinstance(host_dict, dict):
+            return None
+        
+        # 按 hostCode 排序（保证顺序稳定）
+        sorted_hosts = sorted(host_dict.items(), key=lambda x: x[0])
+        
+        # 组装结果列表
+        result = []
+        
+        for host_id, (raw_data, timestamp) in sorted_hosts:
+            # 解析单个主机的数据
+            parsed = self.parse(raw_data)
+            if parsed:
+                # 确保包含 hostCode
+                if 'hostCode' not in parsed:
+                    parsed['hostCode'] = host_id
+                result.append(parsed)
+        
+        return {"device_host_acdc": result}

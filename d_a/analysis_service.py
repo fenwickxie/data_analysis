@@ -32,6 +32,7 @@ from .config import (
     KAFKA_CONFIG,
     TOPIC_TO_MODULES,
     MODULE_TO_TOPICS,
+    MODULE_OUTPUT_TOPICS,
     OFFSET_COMMIT_CONFIG,
 )
 from .dispatcher import DataDispatcher
@@ -60,7 +61,7 @@ class AsyncDataAnalysisService(ServiceBase):
             data_expire_seconds=data_expire_seconds,
         )
 
-        self.dispatcher = DataDispatcher(data_expire_seconds=data_expire_seconds)
+        self.dispatcher = DataDispatcher(data_expire_seconds,False)
         self.consumer = AsyncKafkaConsumerClient(self.topics, self.kafka_config)
 
         # Offset管理器
@@ -77,13 +78,260 @@ class AsyncDataAnalysisService(ServiceBase):
         self._station_stop_flags = {}  # 每个场站的停止标志
         self._station_data_events = {}  # 每个场站的数据就绪事件
         self._station_batch_info = {}  # 场站的批次信息: {station_id: batch_id}
-        self._station_initialized = {}  # 场站是否已初始化（首次数据完整）: {station_id: bool}
+        self._station_initialized = (
+            {}
+        )  # 场站是否已初始化（首次数据完整）: {station_id: bool}
         self._global_data_cache = {}  # 缓存全局数据: {topic: latest_data}
         self._main_task = None  # 主循环任务
         self._stop_event = asyncio.Event()  # 停止事件
         self._callback = None  # 单场站处理回调
         self._result_handler = result_handler  # 单场站结果处理回调
         self._batch_upload_handler = None  # 批次上传回调
+
+        # Topic处理器映射：每个topic直接对应一个处理方法
+        # 优势：直观、易扩展、无需预定义格式字典
+        self._topic_handlers = self._build_topic_handlers()
+
+    def _build_topic_handlers(self):
+        """
+        构建 topic 到处理器的映射
+
+        每个 topic 独立处理方法，直观明确，易于扩展
+
+        Returns:
+            dict: {topic: handler_function}
+        """
+        handlers = {
+            "SCHEDULE-STATION-PARAM": self._handle_station_param,
+            "SCHEDULE-STATION-REALTIME-DATA": self._handle_station_realtime_data,
+            "SCHEDULE-ENVIRONMENT-CALENDAR": self._handle_environment_calendar,
+            "SCHEDULE-DEVICE-METER": self._handle_device_meter,
+            "SCHEDULE-DEVICE-GUN": self._handle_device_gun,
+            "SCHEDULE-CAR-ORDER": self._handle_car_order,
+            "SCHEDULE-CAR-PRICE": self._handle_car_price,
+            "SCHEDULE-DEVICE-ERROR": self._handle_device_error,
+            "SCHEDULE-DEVICE-HOST-DCDC": self._handle_device_host_dcdc,
+            "SCHEDULE-DEVICE-HOST-ACDC": self._handle_device_host_acdc,
+            "SCHEDULE-DEVICE-STORAGE": self._handle_device_storage,
+        }
+
+        # 自动添加模型输出topic处理器
+        for module_name, topic_name in MODULE_OUTPUT_TOPICS.items():
+            if topic_name not in handlers:
+                handlers[topic_name] = self._handle_model_output
+
+        return handlers
+
+    # ==================== Topic 处理器：每个 topic 独立方法 ====================
+
+    @staticmethod
+    def _handle_station_param(value):
+        """
+        处理 SCHEDULE-STATION-PARAM
+        格式: [{'stationId': '...', ...}, ...]
+        """
+        if not isinstance(value, list):
+            return []
+
+        station_data_list = []
+        for item in value:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_data_list.append((station_id, item))
+        return station_data_list
+
+    @staticmethod
+    def _handle_station_realtime_data(value):
+        """
+        处理 SCHEDULE-STATION-REALTIME-DATA
+        格式: {'realTimeData': [{'stationId': '...', 'sendTime': '...', ...}, ...]}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        data_list = value.get("realTimeData")
+        if not data_list or not isinstance(data_list, list):
+            return []
+
+        # 按场站分组
+        from collections import defaultdict
+
+        station_groups = defaultdict(list)
+
+        for item in data_list:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_groups[station_id].append(item)
+
+        # 对每个场站的数据按 sendTime 排序
+        station_data_list = []
+        for station_id, items in station_groups.items():
+            sorted_items = sorted(items, key=lambda x: x.get("sendTime", ""))
+            station_data_list.append((station_id, sorted_items))
+
+        return station_data_list
+
+    @staticmethod
+    def _handle_environment_calendar(value):
+        """
+        处理 SCHEDULE-ENVIRONMENT-CALENDAR
+        格式: {'calendar': [...]}
+        全局数据，无 stationId
+        """
+        if not isinstance(value, dict):
+            return []
+        return [("__global__", value)]
+
+    @staticmethod
+    def _handle_device_meter(value):
+        """
+        处理 SCHEDULE-DEVICE-METER
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_gun(value):
+        """
+        处理 SCHEDULE-DEVICE-GUN
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_car_order(value):
+        """
+        处理 SCHEDULE-CAR-ORDER
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_car_price(value):
+        """
+        处理 SCHEDULE-CAR-PRICE
+        格式: {'fee': [{'stationId': '...', 'sendTime': '...', ...}, ...]}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        data_list = value.get("fee")
+        if not data_list or not isinstance(data_list, list):
+            return []
+
+        # 按场站分组
+        from collections import defaultdict
+
+        station_groups = defaultdict(list)
+
+        for item in data_list:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_groups[station_id].append(item)
+
+        # 对每个场站的数据按 sendTime 排序
+        station_data_list = []
+        for station_id, items in station_groups.items():
+            sorted_items = sorted(items, key=lambda x: x.get("sendTime", ""))
+            station_data_list.append((station_id, sorted_items))
+
+        return station_data_list
+
+    @staticmethod
+    def _handle_device_error(value):
+        """
+        处理 SCHEDULE-DEVICE-ERROR
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_host_dcdc(value):
+        """
+        处理 SCHEDULE-DEVICE-HOST-DCDC
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_host_acdc(value):
+        """
+        处理 SCHEDULE-DEVICE-HOST-ACDC
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_storage(value):
+        """
+        处理 SCHEDULE-DEVICE-STORAGE
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_model_output(value):
+        """
+        处理模型输出 topic (MODULE-OUTPUT-*)
+        格式: {'results': [{'station_id': '...', ...}, ...]}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_data_list = []
+        results = value.get("results", [])
+        if isinstance(results, list):
+            for item in results:
+                if isinstance(item, dict):
+                    station_id = item.get("station_id")
+                    if station_id:
+                        station_data_list.append((station_id, item))
+        return station_data_list
 
     async def _maybe_await(self, func, *args):
         if func is None:
@@ -105,16 +353,21 @@ class AsyncDataAnalysisService(ServiceBase):
             tuple: (是否成功, 场站ID列表)
         """
         topic = msg.topic
-        # 获取Kafka消息的原生时间戳（毫秒转秒）
         kafka_timestamp = msg.timestamp / 1000.0
 
         try:
             value_str = msg.value.decode("utf-8")
             value = json.loads(value_str)
 
-            # 使用基类方法提取场站数据
-            station_data_list = self.extract_station_data(topic, value)
-            
+            # 根据 topic 直接获取对应的处理器
+            handler = self._topic_handlers.get(topic)
+            if not handler:
+                logging.warning(f"未配置处理器的 topic: {topic}，尝试自动识别格式")
+                station_data_list = self._auto_detect_format(value)
+            else:
+                # 直接调用对应的处理器
+                station_data_list = handler(value)
+
             return await self._process_message_with_parsed_data(
                 msg, value, station_data_list, batch_id
             )
@@ -125,6 +378,45 @@ class AsyncDataAnalysisService(ServiceBase):
                 context=f"处理消息 topic={topic}, partition={msg.partition}, offset={msg.offset}",
             )
             return False, []
+
+    @staticmethod
+    def _auto_detect_format(value):
+        """
+        自动识别未配置处理器的topic格式（后备方案）
+
+        Args:
+            value: JSON数据
+
+        Returns:
+            list: [(station_id, raw_data), ...]
+        """
+        if isinstance(value, list):
+            # 尝试作为列表格式处理（SCHEDULE-STATION-PARAM）
+            return AsyncDataAnalysisService._handle_station_param(value)
+        elif isinstance(value, dict):
+            # 检查是否是单场站数据
+            if "stationId" in value:
+                return AsyncDataAnalysisService._handle_car_order(value)
+
+            # 检查是否是模型输出
+            if "results" in value:
+                return AsyncDataAnalysisService._handle_model_output(value)
+
+            # 可能是窗口格式，尝试常见的key
+            if "realTimeData" in value and isinstance(value["realTimeData"], list):
+                logging.info("自动识别为实时数据窗口格式")
+                return AsyncDataAnalysisService._handle_station_realtime_data(value)
+
+            if "fee" in value and isinstance(value["fee"], list):
+                logging.info("自动识别为价格数据窗口格式")
+                return AsyncDataAnalysisService._handle_car_price(value)
+
+            # 可能是全局数据
+            logging.info("自动识别为全局数据格式")
+            return AsyncDataAnalysisService._handle_environment_calendar(value)
+
+        logging.warning(f"无法识别的消息格式: {type(value)}")
+        return []
 
     async def _process_message_with_parsed_data(
         self, msg, value, station_data_list, batch_id=None
@@ -158,7 +450,7 @@ class AsyncDataAnalysisService(ServiceBase):
                 try:
                     # 处理全局数据
                     if station_id == "__global__":
-                        # 1. 缓存全局数据（最新的）
+                        # 缓存全局数据（最新的）
                         self._global_data_cache[topic] = station_data
                         logging.info(f"全局数据已缓存 topic={topic}，等待场站注册")
                         continue
@@ -174,7 +466,7 @@ class AsyncDataAnalysisService(ServiceBase):
 
                     # 创建场站任务（如果不存在）
                     if station_id not in self._station_tasks:
-                        # 先应用全局缓存数据，再创建场站任务
+                        # 1. 先应用全局缓存数据，再创建场站任务
                         # 避免竞态条件：确保场站 worker 启动时已有完整的全局数据
                         if self._global_data_cache:
                             logging.info(
@@ -191,9 +483,9 @@ class AsyncDataAnalysisService(ServiceBase):
                                     kafka_timestamp,
                                 )
 
-                        # 创建场站任务（此时全局数据已就绪）
+                        # 2. 创建场站任务（此时全局数据已就绪）
                         self._create_station_task(station_id)
-                        # 标记场站为未初始化（需要等待关键数据完整）
+                        # 3. 标记场站为未初始化（需要等待关键数据完整）
                         self._station_initialized[station_id] = False
 
                     # 根据 dispatcher 返回值决定是否触发数据就绪事件
@@ -210,10 +502,14 @@ class AsyncDataAnalysisService(ServiceBase):
                                 # 关键数据已完整，标记为已初始化并触发
                                 self._station_initialized[station_id] = True
                                 self._station_data_events[station_id].set()
-                                logging.info(f"场站 {station_id} 首次数据完整，开始处理")
+                                logging.info(
+                                    f"场站 {station_id} 首次数据完整，开始处理"
+                                )
                             else:
                                 # 数据不完整，不触发（等待更多数据）
-                                logging.debug(f"场站 {station_id} 数据尚未完整，等待更多topic数据")
+                                logging.debug(
+                                    f"场站 {station_id} 数据尚未完整，等待更多topic数据"
+                                )
 
                 except Exception as exc:
                     handle_error(
@@ -266,21 +562,26 @@ class AsyncDataAnalysisService(ServiceBase):
                 window = self.dispatcher.get_topic_window(station_id, topic)
                 if window:
                     available_count += 1
+                # 提前返回，避免不必要的计算
+                else:
+                    break
 
             # 要求所有必需的 topic 都有数据（100% 完整）
             data_ready = available_count == len(required_topics)
-            
+
             if not data_ready:
                 logging.debug(
                     f"场站 {station_id} 数据未完整: {available_count}/{len(required_topics)} 个topic有数据"
                 )
-            
+
             return data_ready
         else:
             # 没有指定模块，使用宽松策略：至少 50% 的已订阅 topic 有数据
             station_topics = self.dispatcher.data_cache[station_id]
             total_topics = len(self.topics)
-            available_count = sum(1 for topic in self.topics if station_topics.get(topic))
+            available_count = sum(
+                1 for topic in self.topics if station_topics.get(topic)
+            )
 
             # 至少 50% 的 topic 有数据才触发
             threshold = max(1, total_topics // 2)
@@ -419,15 +720,15 @@ class AsyncDataAnalysisService(ServiceBase):
     async def _main_loop(self):
         """主循环，负责消费Kafka消息并分发处理，管理批次，提交offset等"""
         try:
-            await self.consumer.start() # 启动消费者
+            await self.consumer.start()  # 启动消费者
         except Exception as exc:  # noqa: BLE001
             handle_error(KafkaConnectionError(exc), context="KafkaConsumer连接")
-            await asyncio.sleep(5) # 连接失败后等待5秒再重试
+            await asyncio.sleep(5)  # 连接失败后等待5秒再重试
             return
         try:
-            while not self._stop_event.is_set(): # 主循环，直到收到停止信号
+            while not self._stop_event.is_set():  # 主循环，直到收到停止信号
                 try:
-                    batch = await self.consumer.getmany(timeout_ms=1000) # 拉取一批消息
+                    batch = await self.consumer.getmany(timeout_ms=1000)  # 拉取一批消息
                 except Exception as exc:  # noqa: BLE001
                     handle_error(
                         exc, context="Kafka消费", recover=lambda: asyncio.sleep(2)
@@ -448,13 +749,22 @@ class AsyncDataAnalysisService(ServiceBase):
                 # 第一遍：解析所有消息并缓存结果（避免重复解析JSON）
                 parsed_messages = []  # [(msg, value, station_data_list), ...]
                 all_station_ids = []
-                
+
                 for msg in batch:
                     try:
                         value_str = msg.value.decode("utf-8")
                         value = json.loads(value_str)
-                        station_data_list = self.extract_station_data(msg.topic, value)
-                        
+
+                        # 使用topic处理器映射
+                        handler = self._topic_handlers.get(msg.topic)
+                        if not handler:
+                            logging.warning(
+                                f"未配置处理器的 topic: {msg.topic}，尝试自动识别格式"
+                            )
+                            station_data_list = self._auto_detect_format(value)
+                        else:
+                            station_data_list = handler(value)
+
                         # 缓存解析结果
                         parsed_messages.append((msg, value, station_data_list))
 
@@ -489,7 +799,7 @@ class AsyncDataAnalysisService(ServiceBase):
                     if value is None or station_data_list is None:
                         # 跳过解析失败的消息
                         continue
-                    
+
                     # 使用预解析的数据进行处理
                     await self._process_message_with_parsed_data(
                         msg, value, station_data_list, batch_id
@@ -620,6 +930,181 @@ class DataAnalysisService(ServiceBase):
         self._station_data_events = {}  # 新增：每个场站的数据就绪事件
         self._global_data_cache = {}  # 缓存全局数据: {topic: latest_data}
 
+        # Topic处理器映射（与AsyncDataAnalysisService相同）
+        self._topic_handlers = self._build_topic_handlers()
+
+    def _build_topic_handlers(self):
+        """构建 topic 处理器映射 - 每个 topic 独立方法"""
+        handlers = {
+            "SCHEDULE-STATION-PARAM": self._handle_station_param,
+            "SCHEDULE-STATION-REALTIME-DATA": self._handle_station_realtime_data,
+            "SCHEDULE-ENVIRONMENT-CALENDAR": self._handle_environment_calendar,
+            "SCHEDULE-DEVICE-METER": self._handle_device_meter,
+            "SCHEDULE-DEVICE-GUN": self._handle_device_gun,
+            "SCHEDULE-CAR-ORDER": self._handle_car_order,
+            "SCHEDULE-CAR-PRICE": self._handle_car_price,
+            "SCHEDULE-DEVICE-ERROR": self._handle_device_error,
+            "SCHEDULE-DEVICE-HOST-DCDC": self._handle_device_host_dcdc,
+            "SCHEDULE-DEVICE-HOST-ACDC": self._handle_device_host_acdc,
+            "SCHEDULE-DEVICE-STORAGE": self._handle_device_storage,
+        }
+        for module_name, topic_name in MODULE_OUTPUT_TOPICS.items():
+            if topic_name not in handlers:
+                handlers[topic_name] = self._handle_model_output
+        return handlers
+
+    # ==================== Topic 处理器：每个 topic 独立方法 ====================
+    # （与 AsyncDataAnalysisService 相同的处理器）
+
+    @staticmethod
+    def _handle_station_param(value):
+        """处理 SCHEDULE-STATION-PARAM"""
+        if not isinstance(value, list):
+            return []
+        station_data_list = []
+        for item in value:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_data_list.append((station_id, item))
+        return station_data_list
+
+    @staticmethod
+    def _handle_station_realtime_data(value):
+        """处理 SCHEDULE-STATION-REALTIME-DATA"""
+        if not isinstance(value, dict):
+            return []
+        data_list = value.get("realTimeData")
+        if not data_list or not isinstance(data_list, list):
+            return []
+        from collections import defaultdict
+
+        station_groups = defaultdict(list)
+        for item in data_list:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_groups[station_id].append(item)
+        station_data_list = []
+        for station_id, items in station_groups.items():
+            sorted_items = sorted(items, key=lambda x: x.get("sendTime", ""))
+            station_data_list.append((station_id, sorted_items))
+        return station_data_list
+
+    @staticmethod
+    def _handle_environment_calendar(value):
+        """处理 SCHEDULE-ENVIRONMENT-CALENDAR"""
+        if not isinstance(value, dict):
+            return []
+        return [("__global__", value)]
+
+    @staticmethod
+    def _handle_device_meter(value):
+        """处理 SCHEDULE-DEVICE-METER"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_gun(value):
+        """处理 SCHEDULE-DEVICE-GUN"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_car_order(value):
+        """处理 SCHEDULE-CAR-ORDER"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_car_price(value):
+        """处理 SCHEDULE-CAR-PRICE"""
+        if not isinstance(value, dict):
+            return []
+        data_list = value.get("fee")
+        if not data_list or not isinstance(data_list, list):
+            return []
+        from collections import defaultdict
+
+        station_groups = defaultdict(list)
+        for item in data_list:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_groups[station_id].append(item)
+        station_data_list = []
+        for station_id, items in station_groups.items():
+            sorted_items = sorted(items, key=lambda x: x.get("sendTime", ""))
+            station_data_list.append((station_id, sorted_items))
+        return station_data_list
+
+    @staticmethod
+    def _handle_device_error(value):
+        """处理 SCHEDULE-DEVICE-ERROR"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_host_dcdc(value):
+        """处理 SCHEDULE-DEVICE-HOST-DCDC"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_host_acdc(value):
+        """处理 SCHEDULE-DEVICE-HOST-ACDC"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_storage(value):
+        """处理 SCHEDULE-DEVICE-STORAGE"""
+        if not isinstance(value, dict):
+            return []
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_model_output(value):
+        """处理模型输出 topic"""
+        if not isinstance(value, dict):
+            return []
+        station_data_list = []
+        results = value.get("results", [])
+        if isinstance(results, list):
+            for item in results:
+                if isinstance(item, dict):
+                    station_id = item.get("station_id")
+                    if station_id:
+                        station_data_list.append((station_id, item))
+        return station_data_list
+
     def _station_worker(
         self, station_id, callback, result_handler, stop_event, data_event
     ):
@@ -695,8 +1180,13 @@ class DataAnalysisService(ServiceBase):
                         kafka_timestamp = msg.timestamp / 1000.0
 
                         try:
-                            # 提取场站列表和对应的数据（使用基类方法）
-                            station_data_list = self.extract_station_data(topic, value)
+                            # 使用topic处理器映射提取圼站数据
+                            handler = self._topic_handlers.get(topic)
+                            if not handler:
+                                logging.warning(f"未配置处理器的 topic: {topic}")
+                                station_data_list = []
+                            else:
+                                station_data_list = handler(value)
 
                             if not station_data_list:
                                 logging.debug(
@@ -710,7 +1200,9 @@ class DataAnalysisService(ServiceBase):
                                     # 处理全局数据
                                     if station_id == "__global__":
                                         self._global_data_cache[topic] = station_data
-                                        logging.info(f"全局数据已缓存 topic={topic}，等待场站注册")
+                                        logging.info(
+                                            f"全局数据已缓存 topic={topic}，等待场站注册"
+                                        )
                                         continue
 
                                     # 处理场站数据

@@ -8,6 +8,7 @@ Common exceptions and error-handling utilities for the data_analysis package.
 from __future__ import annotations
 
 import logging
+from logging.handlers import RotatingFileHandler
 import traceback
 from typing import Callable, Optional, Any
 
@@ -16,12 +17,25 @@ _LOGGER_CONFIGURED = False
 
 
 def _ensure_logging() -> None:
-    """Configure root logging once with stream + file handlers."""
+    """
+    Configure root logging once with stream + rotating file handlers.
+    
+    日志轮转配置：
+    - 单个日志文件最大 10MB
+    - 保留最近 5 个备份文件
+    - 总日志空间约 50MB (10MB * 5)
+    """
     global _LOGGER_CONFIGURED
     if _LOGGER_CONFIGURED:
         return
     handler_stream = logging.StreamHandler()
-    handler_file = logging.FileHandler("data_analysis.log", encoding="utf-8")
+    # 使用 RotatingFileHandler：单个文件 10MB，保留 5 个备份
+    handler_file = RotatingFileHandler(
+        "data_analysis.log",
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5,              # 保留 5 个备份 (.log.1, .log.2, ...)
+        encoding="utf-8"
+    )
     logging.basicConfig(
         level=logging.INFO,
         format=LOG_FORMAT,
