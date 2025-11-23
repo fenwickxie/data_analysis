@@ -1,6 +1,6 @@
 # 算法设计说明书（Data Analysis Module）
 
-更新时间：2025-11-07  |  版本：v1.1
+更新时间：2025-11-23  |  版本：v1.2
 
 ---
 
@@ -10,6 +10,7 @@
 |------|------|----------|--------|
 | v1.0 | 2025-10-23 | 初始版本 | - |
 | v1.1 | 2025-11-07 | 根据实际代码全面修订，包括：<br/>1. 更新API方法名称（get_module_input → get_all_inputs）<br/>2. 补充result_handler参数说明<br/>3. 详细说明消息解码流程（bytes → UTF-8 → JSON）<br/>4. 更新Kafka客户端实现细节（getmany批量处理）<br/>5. 补充动态添加/移除场站功能<br/>6. 更新Topic配置字段名（匹配实际驼峰命名）<br/>7. 扩展错误处理和恢复策略说明<br/>8. 补充并发模型和线程安全详情<br/>9. 移除未实现的补全策略（当前版本不支持）<br/>10. 更新配置示例为实际生产配置 | -|
+| v1.2 | 2025-11-23 | 融合批次结果聚合、数据质量元信息、全局数据缓存与多消费者/Offset修复方案：<br/>1. 描述`BatchResultAggregator`与`batch_upload_handler`契约<br/>2. 记录 `_data_quality` 元信息和使用示例<br/>3. 补充 `_global_data_cache` 工作流，避免全局topic丢失<br/>4. 文档化 `OffsetManager`、`OFFSET_COMMIT_CONFIG` 与提交策略<br/>5. 扩展 Kafka 多消费者模式、独立 `group_id` 与空拉取诊断指南 | - |
 
 ---
 
@@ -40,19 +41,18 @@
 
 ### 2.1 运行流程
 
-1. **Kafka消费**：按配置订阅多个Topic，获取原始消息
-2. **消息反序列化**：将bytes消息解码为UTF-8字符串，再解析为JSON dict
-3. **场站识别**：从消息中提取station_id/host_id/meter_id作为路由标识
-4. **Topic解析**：调用对应的TopicParser将原始消息解析为结构化字段
-5. **窗口更新**：按Topic配置维护固定大小窗口（deque），新数据追加到窗口尾部
-6. **场站任务管理**：为首次出现的场站动态创建异步Task或线程
-7. **模块输入组装**：
-   - 从窗口中提取最新数据进行解析
-   - 创建字段窗口（field_window）和最新值（field）
-   - 处理模块间依赖，从依赖模块的输出Topic获取数据
-8. **业务回调**：将组装好的模块输入传递给回调函数处理
-9. **结果处理**：可选的结果处理器（result_handler）统一处理回调结果和上传
-10. **清理与过期**：定期清理过期窗口数据，维护内存与一致性
+1. **Kafka消费**：按配置订阅多个Topic，结合 `multi_consumer_mode` 并发拉取，保证积压场景下的Topic公平性。
+2. **消息反序列化**：将bytes解码为UTF-8字符串并 `json.loads` 为dict，失败时记录上下文并跳过。
+3. **场站识别**：优先读取 `station_id`，否则回退 `host_id` / `meter_id`；未识别的消息仅记录日志。
+4. **全局数据缓存/广播**：当解析到 `"__global__"` 场站（如 `SCHEDULE-ENVIRONMENT-CALENDAR`）时，将 payload 写入 `_global_data_cache`，即时广播给已存在的场站，并在后续新场站初始化时补发，防止冷启动期间丢失全局参数。
+5. **Topic解析**：通过 `TopicParser` 输出结构化字段，并为设备聚合类Topic（DCDC/ACDC/Storage）维护嵌套字典。
+6. **窗口更新**：按照 `TOPIC_DETAIL.window_size` 使用 `deque` 维护窗口；CAR-ORDER 等Topic包含秒级聚合与触发事件的特化逻辑。
+7. **场站任务管理**：首次收到场站数据时动态创建 Task/Thread，并将 `_station_data_events`、`_station_batch_info` 等运行态与之绑定。
+8. **模块输入组装与 `_data_quality`**：`DataDispatcher.get_module_input` 会聚合所有必需Topic窗口，对缺失Topic写入 `_data_quality.missing_topics`，对存在数据的Topic写入 `_data_quality.available_topics` 并计算 `availability_ratio`。
+9. **业务回调**：将模块输入（或按模块过滤后的输入）传递给同步/异步 callback，业务可用 `_data_quality` 做降级或关键Topic校验。
+10. **单场站结果处理**：若注册 `result_handler`，以 `(station_id, module_input, result)` 形式接收 callback 结果，常用于单站日志、监控或补偿上传。
+11. **批次结果聚合**：若提供 `batch_upload_handler` 且批次包含多个场站，`BatchResultAggregator` 会跟踪批次进度，全部完成或超时后以 `(batch_id, results_list)` 调用 handler，实现一次性上传。
+12. **Offset管理与清理**：`OffsetManager` 根据 `OFFSET_COMMIT_CONFIG` 追踪批次处理量与时间，满足条件即提交 offset；随后调度 `clean_expired()` 清理过期窗口数据，维持内存健康。
 
 Mermaid时序图（异步主流程）：
 
@@ -600,6 +600,13 @@ KAFKA_CONFIG = {
 }
 ```
 
+###### 多消费者模式（multi_consumer_mode）
+
+- **启用方式**：在 `KAFKA_CONFIG['consumer']` 中设置 `multi_consumer_mode=True`（默认开启）。当订阅Topic数量>1时，`AsyncKafkaConsumerClient` 会为每个Topic创建独立的 `AIOKafkaConsumer`，并使用 `asyncio.gather` 并发 `getmany`，彻底缓解“Topic饥饿”。
+- **group_id 策略**：推荐为每个Topic派生独立的 `group_id`（如 `f"{base_group}-{topic}"`），以避免多消费者共享同一组导致的 `Fetch offset is out of range`。仓库提供 `tests/verify_group_id_fix.py` 用于CI/本地校验，保证不会回退到旧行为。
+- **空拉取/积压诊断**：`multi_consumer_mode` 会分别记录每个Topic拉取数量并打印日志。出现空拉取时，可结合 `OffsetOutOfRangeError` 日志、Kafka消费者组Lag以及 `getmany(timeout)` 的返回长度判断是否需要调整 `max_poll_records` 或 `auto_offset_reset`。
+- **回退**：当仅订阅单一Topic或受资源限制时，可将 `multi_consumer_mode=False` 回退至单消费者模式；此时 `max_records` 限制应用于所有Topic的总量。
+
 <a id="sec-2-3-5"></a>
 #### 2.3.5 异常类与回调契约
 
@@ -719,6 +726,117 @@ result_handler(station_id, module_input, result)
 - AsyncDataAnalysisService：不同场站的回调在不同Task中并发执行
 - 回调函数应避免共享可变状态，或使用适当的同步机制
 
+<a id="sec-2-3-6"></a>
+#### 2.3.6 BatchResultAggregator（批次结果聚合器）
+
+**位置**：`d_a/batch_result_aggregator.py`
+
+**用途**：当单条Kafka消息携带多个场站（尤其是 `SCHEDULE-STATION-REALTIME-DATA`）的数据时，逐场站上传会导致同一批数据的结果分散。`BatchResultAggregator` 将同一批内的所有场站结果在内存中聚合，全部到齐或超时后由 `batch_upload_handler(batch_id, results_list)` 一次性上传。
+
+**核心结构**：
+- `BatchResultAggregator`：维护 `{batch_id: BatchCollector}`、批次超时（默认5秒）以及清理逻辑。
+- `BatchCollector`：持有 `expected_stations` 集合、`_results` 字典和 `asyncio.Event`；在 `add_result(station_id, result)` 时跟踪进度。
+
+**典型流程**：
+```python
+# _main_loop 中解析完一批消息后：
+if batch_ids and batch_upload_handler:
+    collector = await batch_aggregator.get_or_create_batch(batch_id, stations, batch_upload_handler)
+
+# 每个场站worker完成时：
+await collector.add_result(station_id, result)
+
+# BatchCollector 内部：
+if len(_results) == expected_count:
+    await _do_upload()  # or timeout触发 force_complete()
+
+async def _do_upload():
+    payload = [result for result in _results.values() if result is not None]
+    await batch_upload_handler(batch_id, payload)
+```
+
+**回调契约**：
+- `AsyncDataAnalysisService.start(..., batch_upload_handler=my_handler)` 启用批次聚合；若未提供 handler，系统保持旧的逐场站 `result_handler` 行为。
+- `batch_upload_handler` 接收 `(batch_id, results_list)`，其中 `results_list` 仅包含非 `None` 的场站结果；建议业务在 callback 返回值中显式注入 `station_id` 以便组装上传载荷。
+- 批次 ID 由服务根据当前批内消息的时间戳或 `sendTime` 构造（形如 `SCHEDULE-STATION-REALTIME-DATA_1699999200`），超时会写出缺失场站数量的警告日志。
+
+**容错**：
+- 某场站 callback 抛错或返回 `None` 只会影响其自身，不会阻止批次上传。
+- `_monitor_batch` 使用 `asyncio.wait_for` + `batch_timeout` 控制最长等待，并在 `BatchCollector.force_complete()` 中打印成功/失败/无输出计数，便于排查。
+
+<a id="sec-2-3-7"></a>
+#### 2.3.7 OffsetManager（异步offset调度）
+
+**位置**：`d_a/offset_manager.py`
+
+**目的**：统一跟踪 `AsyncKafkaConsumerClient` 的消费进度并批量提交 offset，避免 `enable_auto_commit=True` 带来的不可控延迟，同时减少对Kafka的提交压力。
+
+**主要方法**：
+
+| 方法 | 说明 |
+|------|------|
+| `track_message(msg)` | 消费到消息后立即记录 `(topic, partition) -> msg.offset+1)`，并增加 `_processed_count` |
+| `should_commit()` | 依据 `commit_batch_size`（默认100）和 `commit_interval_seconds`（默认5秒）判断是否触发提交 |
+| `await commit()` | 将 `_pending_offsets` 转换为 `TopicPartition → OffsetAndMetadata`，按 `max_commit_retries` 与 `commit_retry_delay` 进行重试提交，成功后清空状态 |
+
+**配置**：`OFFSET_COMMIT_CONFIG` 默认值：
+
+| 字段 | 默认值 | 含义 |
+|------|--------|------|
+| `commit_interval_seconds` | 5.0 | 即使未到批次大小，也会在该时间后提交 |
+| `commit_batch_size` | 100 | 处理满100条消息立即提交 |
+| `max_commit_retries` | 3 | 单次提交的最大重试次数 |
+| `commit_retry_delay` | 1.0 | 重试之间的延迟（秒） |
+
+**运行时集成**：
+- `_main_loop` 每次 `getmany` 之后都会调用 `offset_manager.track_message(msg)`（在解析流程中完成），并在批次结束或空拉取时检查 `should_commit()`；Service 停止前会强制 `commit()` 确保不丢offset。
+- 若提交失败会保留 `_pending_offsets`，下个周期重试，不会出现 offset 回退。
+
+<a id="sec-2-3-8"></a>
+#### 2.3.8 全局数据缓存与场站自举
+
+**场景**：`SCHEDULE-ENVIRONMENT-CALENDAR` 等全局Topic可能在任何场站出现之前就到达，旧逻辑会因“尚无场站”而丢弃消息。
+
+**机制**：
+- `_global_data_cache: {topic: latest_payload}`：记录最近一次全局topic的值。
+- 当 `station_id == "__global__"` 时：
+  1. 将 payload 写入缓存。
+  2. 若已有场站任务，实时广播到所有场站（并触发 `_station_data_events`）。
+  3. 若暂无场站，仅记录日志“等待场站注册”。
+- 新场站通过 `add_station()` 创建任务时，会遍历 `_global_data_cache`，把所有全局Topic的最新值回放给该场站，确保冷启动即可拿到日历/配置数据。
+
+**优点**：解决先有全局数据、后有场站的竞态；缓存体积极小（Topic级别的最新一条记录），无需额外清理。
+
+<a id="sec-2-3-9"></a>
+#### 2.3.9 数据可用性元信息 `_data_quality`
+
+**来源**：`DataDispatcher.get_module_input()` 会在返回的字典中附加 `_data_quality` 字段，用于业务方评估各Topic数据是否可用。
+
+**字段含义**：
+
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| `available_topics` | list[str] | 当前窗口中至少有一条数据的Topic列表（不区分新旧，慢速Topic使用缓存属正常） |
+| `missing_topics` | list[str] | 完全没有数据的Topic，用于快速定位缺口 |
+| `total_topics` | int | 模块所需Topic总数 |
+| `availability_ratio` | float | 可用比率 = `available_topics / total_topics` |
+
+**使用示例**：
+```python
+def callback(station_id, module_input):
+    quality = module_input.get('_data_quality', {})
+    if quality.get('availability_ratio', 0) < 0.8:
+        return None  # 数据不足，等待下一次
+    if 'SCHEDULE-CAR-ORDER' not in quality.get('available_topics', []):
+        return None  # 关键Topic缺失
+    return run_model(module_input)
+```
+
+**最佳实践**：
+- 对关键Topic建立白名单检查，缺失即降级或报警。
+- 在 `result_handler` / 监控模块中记录 `availability_ratio`，作为数据质量指标。
+- 若慢速Topic经常被标记为缺失，检查 `data_expire_seconds` 是否过短或Producer是否异常。
+
 ### 2.4 输入与输出
 
 **输入**：
@@ -785,8 +903,14 @@ result_handler(station_id, module_input, result)
      - 数据库存储
      - 下游系统调用
      - 监控指标上报
+    - 若启用了 `BatchResultAggregator`，请确保callback返回的dict包含 `station_id`（或可在batch handler中自行注入），以便批次上传时关联场站。
 
-4. **标准输出格式**（用于Kafka上传）：
+4. **批次上传回调**（可选）：
+    - 通过 `AsyncDataAnalysisService.start(..., batch_upload_handler=handler)` 注册
+    - 签名：`handler(batch_id: str, results_list: list[dict])`
+    - `results_list` 仅包含返回非 `None` 的场站结果；batch超时也会调用handler，方便补数/报警。
+
+5. **标准输出格式**（用于Kafka上传）：
    ```python
    {
        'station_id': str,        # 场站ID

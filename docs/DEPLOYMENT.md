@@ -171,6 +171,44 @@ OFFSET_COMMIT_CONFIG = {
 - 高吞吐场景：增大`commit_batch_size`（如500-1000），减少提交频率
 - 消息处理耗时长：适当增大两个参数值，避免频繁提交影响性能
 
+#### 多消费者模式运维 (multi_consumer_mode)
+
+- **适用场景**：订阅≥3个 topic、且其中某些 topic 可能出现堆积；默认开启，多 topic 时每个 topic 拥有独立 `AIOKafkaConsumer` 和 `max_poll_records` 配额，确保公平拉取。
+- **监控**：
+  - 设置 `logging` 等级为 `DEBUG` 可得到 `多消费者拉取统计 [topic:count,...]`。
+  - 运行态可通过 `service.consumer.get_lag_info()` 打印各 topic 的 `current_offset`，配合 Kafka 自带的 `kafka-consumer-groups.sh` 监测 LAG。
+- **资源规划**：topic 数量 ≈ Kafka 连接数；容器需预留额外 20~30MB/10 topic 内存；如资源紧张可暂时把 `multi_consumer_mode` 设为 `False` 回退单消费者。
+- **运行调优**：
+  - `max_poll_records`（默认200）可根据 topic 数据量调整；多 topic 模式下该值会作为“每 topic 上限”。
+  - `fetch_max_wait_ms` 决定 broker 等待时间，若 topic 低频可提升到 1000ms 减少空拉取；若追求低延迟可降到 200~300ms。
+  - `fetch_min_bytes` 可调到 1024/4096，避免 broker 仅返回几个字节导致 CPU 空转。
+
+#### 空拉取排查手册
+
+1. 确认业务侧是否真的在生产新消息（可用 `kafka-console-consumer` 观察）。
+2. 打开 `DEBUG` 日志，查阅“多消费者拉取统计”是否持续某些 topic 为 0。
+3. 调整 `timeout_ms` 至 3000~5000ms，再观察是否有消息返回；若仍无，可把 `fetch_max_wait_ms` 从 500 提升到 1000。
+4. 使用 Kafka 命令确认 LAG：
+   ```bash
+   kafka-consumer-groups.sh --bootstrap-server <broker> --describe --group <group>
+   kafka-run-class.sh kafka.tools.GetOffsetShell --broker-list <broker> --topic <topic> --time -1
+   ```
+   若 LAG=0 则说明消费者已赶上最新 offset，返回空是预期行为。
+5. 对于极低频 topic，可考虑关闭其独立消费者，转而使用单消费者模式统一拉取。
+
+#### group_id 迁移与 offset 越界处理
+
+- **场景**：从单消费者切换到多消费者、长时间停机、或 Kafka 已清理旧日志，旧 `group_id` 中记录的 offset 会失效，日志会出现 `Fetch offset ... is out of range`。
+- **解决**：
+  1. 修改 `KAFKA_CONFIG['consumer']['group_id']`，加上版本或日期后缀（如 `stack-charge-tcp-command-xfy-20251123`），重启服务后 Kafka 会从 `auto_offset_reset` 位置开始消费。
+  2. 需要验证 per-topic group patch 时，执行 `python verify_group_id_fix.py`，确保生成的 group 格式为 `{base_group_id}-{topic}`。
+  3. 如需彻底清理旧 group，可运行：
+     ```bash
+     kafka-consumer-groups.sh --bootstrap-server <broker> --delete --group <old_group>
+     ```
+  4. 若必须重新消费历史数据，将 `auto_offset_reset` 暂时改成 `earliest`，留意可能产生的大量补数据。
+- **运维提示**：任何大版本升级或消费模式变更前，先切换到新的 group_id，可避免与旧 offset 缠绕造成“重复消费/越界”双重风险。
+
 #### 窗口和补全配置
 
 ```python
@@ -279,7 +317,10 @@ async def main():
     )
     
     try:
-        await service.start(callback=my_callback)
+    await service.start(
+      callback=my_callback,
+      batch_upload_handler=batch_upload_handler,
+    )
         # 保持运行
         await asyncio.Event().wait()
     except KeyboardInterrupt:
@@ -289,6 +330,29 @@ async def main():
 if __name__ == '__main__':
     asyncio.run(main())
 ```
+
+#### 批次上传回调示例
+
+```python
+async def batch_upload_handler(batch_id, results_list):
+  """一次性上传同一批所有场站结果"""
+  if not results_list:
+    logging.warning("%s 批次没有有效结果，跳过上传", batch_id)
+    return
+
+  payload = {
+    "batch_id": batch_id,
+    "module": "load_prediction",
+    "timestamp": time.time(),
+    "stations": results_list,
+    "station_count": len(results_list),
+  }
+  await kafka_producer.send("MODULE-OUTPUT-LOAD_PREDICTION", value=payload)
+```
+
+- `results_list` 中的元素已经包含 `station_id` 字段；返回 `None` 的场站不会出现在列表里。
+- `_batch_timeout` 默认 5 秒，可根据模型耗时设置为 3~10 秒；若需要 80% 完成即上传，可在自定义 `BatchCollector` 中调整阈值。
+- `batch_upload_handler` 可以是同步函数，框架会自动检测并在需要时 `await`。
 
 #### Linux系统服务启动脚本
 
@@ -725,6 +789,21 @@ PROCESSING_TIME = Histogram('data_analysis_processing_seconds', 'Processing time
 # 在服务启动时启动metrics服务器
 start_http_server(8001)  # 在8001端口暴露metrics
 ```
+
+### 批次上传与数据可用性监控
+
+- **BatchResultAggregator 日志**：
+  - `创建批次 ... 期望场站数: N`：确认批次识别成功。
+  - `批次 ... 收到场站 S001 结果`：可用于追踪长尾场站。
+  - `批次 ... 超时 (5秒)`：需要检查模型耗时或数据缺失，可通过 `batch_timeout` 调整。
+- **Prometheus 指标建议**：
+  - `batch_success_total` / `batch_timeout_total`：区分正常完成与超时。
+  - `batch_station_count`：每批次成功场站数量直方图。
+  - `_data_quality_availability_ratio`：可将 `_data_quality['availability_ratio']` 汇报成直方图，结合 `missing_topics` 个数输出额外 Gauge。
+- **告警示例**：
+  - `availability_ratio < 0.5` 连续 5 分钟：告警数据链路缺失。
+  - `batch_timeout_rate > 10%`：需要排查回调耗时或 Kafka 告警。
+- **全局数据缓存观察**：日志中会输出 `全局数据已缓存 ...` 和 `新场站 ... 应用 X 个全局数据`，若缺失说明 topic 未按 `__global__` 识别或缓存被误清理。
 
 ### 日志分析
 

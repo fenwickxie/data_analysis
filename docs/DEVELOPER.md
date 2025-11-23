@@ -1,19 +1,25 @@
 # 开发者指南
 
-> **文档版本**：v1.1  
-> **更新日期**：2025-11-07  
+> **文档版本**：v1.2  
+> **更新日期**：2025-11-23  
 > **对应代码版本**：data_analysis v1.1 (branch: feature-one)
 
 本文档为data_analysis模块的开发者提供详细的架构说明、扩展指南和性能优化建议。
 
 **修订说明**：
+- v1.2 (2025-11-23): 融合批次聚合、数据可用性、全局缓存、多消费者与重构计划文档
+    - 新增 BatchResultAggregator、OffsetManager、Global Data Cache、multi-consumer 等内部组件说明
+    - 记录 `_data_quality` 元信息与全局数据竞态修复策略
+    - 总结 offset out-of-range 处理、group_id 迁移和空拉取诊断手册
+    - 扩展 Topic/站点解析指南，列举所有受支持的数据格式
+    - 引入重构路线图与相关测试指引
 - v1.1 (2025-11-07): 更新以匹配实际开发需求
-  - 更正架构组件描述以反映实际实现
-  - 更新Topic和Module解析器添加流程
-  - 移除未实现的padding策略相关内容
-  - 更新Kafka配置最佳实践
-  - 补充实际的测试用例位置和使用方法
-  - 添加项目结构说明
+    - 更正架构组件描述以反映实际实现
+    - 更新Topic和Module解析器添加流程
+    - 移除未实现的padding策略相关内容
+    - 更新Kafka配置最佳实践
+    - 补充实际的测试用例位置和使用方法
+    - 添加项目结构说明
 
 ## 目录
 
@@ -36,6 +42,18 @@ data_analysis模块采用分层架构设计，核心包名为 `d_a`，主要包�
 +---------------------------+
 |      数据分发层           |  (DataDispatcher - 窗口管理、依赖处理)
 +---------------------------+
+```
+
+### 批次上传集成指南
+
+1. **启用批次聚合**：调用 `AsyncDataAnalysisService.start(..., batch_upload_handler=handler)`；若 handler 为空则保持旧的逐场站上传逻辑。
+2. **batch_id 生成**：当前实现从 `SCHEDULE-STATION-REALTIME-DATA` 最新 `sendTime` 获取时间戳，拼接 topic 形成 `topic_ts`；如需其他策略，可在 `_extract_batch_id` 中扩展。
+3. **handler 契约**：
+   - 函数签名 `async def handler(batch_id: str, results_list: list[dict])`。
+   - 每个 result 已包含 `station_id`，只包含返回非 `None` 的场站。
+   - 适合一次性发送到 `MODULE-OUTPUT-*` 或写入对象存储。
+4. **超时与清理**：`BatchResultAggregator(batch_timeout=5.0, cleanup_interval=60.0)`；可根据模型耗时/批次大小调整，或实现自定义 `BatchCollector`（例如到达 80% 即提前上传）。
+5. **降级策略**：无法识别批次的消息会直接调用 `result_handler`；可在 handler 中检测 `results_list` 为空决定是否跳过上传。
 |      解析器层             |  (TopicParser / ModuleParser)
 +---------------------------+
 |      Kafka连接层          |  (KafkaConsumerClient / KafkaProducerClient)
@@ -128,6 +146,26 @@ d_a/
    - `KafkaConnectionError`: Kafka连接异常
    - `DispatcherError`: 数据分发异常
    - `handle_error()`: 统一错误处理函数（日志记录、上下文、恢复回调）
+
+8. **BatchResultAggregator** (`batch_result_aggregator.py`)
+    - 为 `AsyncDataAnalysisService` 提供批次级输出聚合，核心对象 `BatchCollector` 记录 `expected_stations`、`results` 与超时时间。
+    - `_batch_timeout` 默认 5 秒，可通过 `service.batch_aggregator.batch_timeout` 调整；`cleanup_interval` 控制过期批次清理。
+    - `_batch_upload_handler(batch_id, results_list)` 只有在所有场站完成或超时后调用；内部会自动过滤 `None` 结果并补充 `station_id`。
+
+9. **OffsetManager** (`offset_manager.py`)
+    - 管理 `AsyncKafkaConsumerClient` 的手动 offset 提交，兼顾“消息数阈值”和“时间阈值”双触发。
+    - `track_message` 缓存 `(topic, partition) -> offset+1`，`commit()` 会构造 `TopicPartition` 映射并带重试提交，失败时保留 `_pending_offsets`。
+    - 通过 `OFFSET_COMMIT_CONFIG` 可调提交频率和重试策略，支持追踪日志 `成功提交 N 个分区 offset`。
+
+10. **全局数据缓存与数据可用性元信息**
+     - `_global_data_cache` 缓存诸如 `SCHEDULE-ENVIRONMENT-CALENDAR` 的全局 payload，无论是否已有场站，避免“先到全局数据”被丢弃。
+     - 新场站注册前先应用缓存，再创建 worker，修复了“worker 先启动但未获得全局数据”的竞态。
+     - `dispatcher` 在模块输入中注入 `_data_quality` 字段，包含 `available_topics`、`missing_topics`、`availability_ratio` 等，用于业务降级策略和监控。
+
+11. **多消费者 Kafka 客户端** (`kafka_client.py`)
+     - `multi_consumer_mode=True` 时为每个 topic 创建独立 `AIOKafkaConsumer` 并并发拉取，日志里会打印 `多消费者拉取统计`。
+     - 提供 `get_lag_info()`、`get_consumer()` 辅助排障，`_fetch_from_consumer` 内含 offset 越界处理和自动 `seek()`。
+     - 若需要 per-topic 独立 group，可在 `create_consumer` 中自定义 `group_id=f"{base_group}-{topic}"`，配合 `verify_group_id_fix.py` 校验。
 
 ### 数据流向
 
@@ -267,6 +305,22 @@ TOPIC_DETAIL = {
     # 其他topic配置...
 }
 ```
+
+### 消息格式支持与 `extract_station_data`
+
+`ServiceBase.extract_station_data`/`AsyncDataAnalysisService._topic_handlers` 支持以下 Kafka payload 格式：
+
+| 格式 | 示例 topic | 数据形态 | 备注 |
+| --- | --- | --- | --- |
+| 直接列表 | `SCHEDULE-STATION-PARAM` | `[{'stationId': ...}, ...]` | 每条记录映射为 `(stationId, item)` |
+| `realTimeData` | `SCHEDULE-STATION-REALTIME-DATA` | `{'realTimeData': [...]}` | 先按 `stationId` 分组，再按 `sendTime` 排序 |
+| `fee` 列表 | `SCHEDULE-CAR-PRICE` | `{'fee': [...]}` | 支持同场站多条费率；自动分组排序 |
+| 单场站字典 | `SCHEDULE-DEVICE-STORAGE` 等 | `{'stationId': '...', ...}` | 直接映射单条记录 |
+| 嵌套设备聚合 | `SCHEDULE-DEVICE-HOST-DCDC/ACDC` | `{'hostCode': ..., ...}` | dispatcher 层会聚合到设备映射 |
+| 全局数据 | `SCHEDULE-ENVIRONMENT-CALENDAR` | `{'calendar': [...]}` | 标记为 `('__global__', value)`，写入全局缓存 |
+
+- 未包含 `stationId` 的字典会检测是否命中 `global_keys`，否则记录 warning，便于扩展新格式。
+- 对应测试位于 `tests/test_extract_station_data.py`，涵盖 fee/realTimeData/全局/单场站等情况；新增格式时务必补充测试以避免回归。
 
 ### 添加新的业务模块解析器
 
@@ -636,9 +690,17 @@ TOPIC_DETAIL = {
    - 监控指标：回调处理耗时、解析器执行时间
    - 优化方案：优化解析逻辑，减少不必要的数据复制
    
-4. **并发限制**：
-   - 同步服务：ThreadPoolExecutor默认32个worker，可根据场站数量调整
-   - 异步服务：asyncio.Task数量取决于场站数量，注意系统资源限制
+5. **并发限制**：
+    - 同步服务：ThreadPoolExecutor默认32个worker，可根据场站数量调整
+    - 异步服务：asyncio.Task数量取决于场站数量，注意系统资源限制
+
+6. **Topic 饥饿 / 空拉取**：
+    - 当只使用单消费者或 `max_poll_records` 过大时，热点 topic 可能占满配额，其他 topic 长期 0 条。
+    - 优化方案：启用 `multi_consumer_mode`，调低 `fetch_max_wait_ms` 或增大 `timeout_ms`，利用 `get_lag_info()` + Kafka CLI 检查真实滞后，并根据 `MULTI_CONSUMER_EMPTY_FETCH_DIAGNOSIS` 文档调参。
+
+7. **批次上传超时**：
+    - `BatchResultAggregator` 默认 5 秒超时，当模型推理耗时长或场站数据缺失时会触发超时上传。
+    - 优化方案：按模块特性调整 `batch_timeout`、增加 `results_list` 补偿逻辑或分批次调度。
 
 ### 大规模部署注意事项
 
@@ -689,7 +751,10 @@ tests/
 ├── test_async_service.py           # 异步服务集成测试
 ├── test_extreme_and_integration.py # 边界条件和集成测试
 ├── test_integration_extra.py       # 扩展集成测试（健康监控、配置热更新）
-└── test_kafka_upload.py            # Kafka上传功能测试
+├── test_batch_upload.py            # BatchResultAggregator 批次上传测试
+├── test_extract_station_data.py    # 消息格式识别及全局/fee解析测试
+├── test_kafka_upload.py            # Kafka上传功能测试
+└── verify_group_id_fix.py          # 多消费者 group_id 验证脚本
 ```
 
 **运行测试**：
@@ -732,6 +797,20 @@ pytest tests/test_async_service.py -v --asyncio-mode=auto
    - 健康检查API测试
    - 配置热更新功能测试
    - 服务状态监控测试
+
+5. **test_batch_upload.py**：
+    - 批次ID提取、预期场站集合与进度追踪
+    - 超时触发与 `_batch_upload_handler` 调用次数
+    - `results_list` station_id 注入与 `None` 过滤
+
+6. **test_extract_station_data.py**：
+    - 列表/`realTimeData`/`fee`/单场站/全局格式解析
+    - fee 字段排序与多条费率合并
+    - 空 payload、防御性日志覆盖
+
+7. **verify_group_id_fix.py**：
+    - 启动多消费者后读取配置，断言每个 topic 的 group_id 是否符合 `{base_group}-{topic}`
+    - 可用于 CI 中验证多消费者补丁是否被回滚
 
 **模拟数据生成器**：
 
