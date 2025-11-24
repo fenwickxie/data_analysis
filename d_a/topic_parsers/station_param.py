@@ -64,7 +64,7 @@ class StationParamParser(ConfigBasedParser):
             dict: 解析后的数据
         """
         if not window_data:
-            return {}
+            return None
         
         # 使用窗口中最新的数据（最后一个元素）
         return self.parse(window_data[-1])

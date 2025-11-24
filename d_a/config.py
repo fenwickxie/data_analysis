@@ -21,7 +21,7 @@ KAFKA_CONFIG = {
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         # 多消费者模式配置
         'multi_consumer_mode': True,  # 启用多消费者模式：为每个topic创建独立消费者，解决消息积压时的topic饥饿问题
-        'max_poll_records': 200,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
+        'max_poll_records': 10,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
         'enable_auto_commit': False,  # 关闭自动提交，由服务统一管理
         # 字节数限制
         "max_partition_fetch_bytes": 100 * 1024 * 1024,   # 单分区100MB
@@ -120,6 +120,18 @@ TOPIC_DETAIL = {
         'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization'],
         'window_size': 1
     },
+    'SCHEDULE-DEVICE-PV':{
+        'fields': ['stationId', 'pvId', 'pvPreDcPower'],
+        'frequency': '一天1次',
+        'modules': ['pv_prediction'],
+        'window_size': 1
+    },
+    'SCHEDULE-ENVIRONMENT-WEATHER': {
+        'fields':['weatherSituationYesterday','seasonTomorrow','weatherSituationTomorrow'],
+        'frequency': '一天1次',
+        'modules': ['pv_prediction'],
+        'window_size': 1
+    }
 }
 
 # 各模块间依赖关系
@@ -127,7 +139,7 @@ MODULE_DEPENDENCIES = {
     'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
     'station_guidance': ['load_prediction', 'evaluation_model'],
     'thermal_management': ['load_prediction', 'operation_optimization'],
-    'operation_optimization': ['load_prediction'],
+    'operation_optimization': ['pv_prediction'],
     # 其他模块依赖可扩展
 }
 

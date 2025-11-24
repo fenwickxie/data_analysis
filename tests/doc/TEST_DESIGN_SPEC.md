@@ -1,22 +1,27 @@
 # Data Analysis 项目测试软件说明书
 
-**版本**: 1.0  
-**日期**: 2025年11月6日  
-**项目**: 充电桩数据分析平台测试套件
+**版本**: 3.0  
+**日期**: 2025年11月24日  
+**项目**: 充电桩数据分析平台测试套件  
 
 ---
+
+## 文档说明
+
+本文档是测试套件的**技术文档**。
 
 ## 目录
 
 1. [概述](#1-概述)
-2. [测试架构](#2-测试架构)
-3. [测试工具详解](#3-测试工具详解)
-4. [API接口详解](#4-api接口详解)
-5. [测试用例说明](#5-测试用例说明)
-6. [使用指南](#6-使用指南)
-7. [配置说明](#7-配置说明)
-8. [故障诊断](#8-故障诊断)
+2. [重构与精简历程](#2-重构与精简历程)
+3. [设计模式应用](#3-设计模式应用)
+4. [测试架构](#4-测试架构)
+5. [核心组件详解](#5-核心组件详解)
+6. [API接口详解](#6-api接口详解)
+7. [使用指南](#7-使用指南)
+8. [扩展指南](#8-扩展指南)
 9. [最佳实践](#9-最佳实践)
+10. [附录](#10-附录)
 
 ---
 
@@ -24,9 +29,16 @@
 
 ### 1.1 项目背景
 
-本测试套件为充电桩数据分析平台提供完整的测试解决方案，涵盖单元测试、集成测试、端到端测试等多个层面。
+本测试套件为充电桩数据分析平台提供完整的测试解决方案，涵盖单元测试、集成测试、端到端测试等多个层面。经过**两轮重构优化**，测试代码质量和组织性得到显著提升。
 
-### 1.2 测试范围
+### 1.2 测试目标
+
+- **提高测试覆盖率**: 确保所有核心功能模块得到充分测试
+- **提升测试效率**: 通过自动化测试减少人工干预，提高测试速度
+- **增强测试可靠性**: 通过单元测试和集成测试确保代码质量
+- **优化测试流程**: 通过模块化设计和代码复用减少重复工作
+
+### 1.3 测试范围
 
 - **Kafka消息队列**: 数据生产、消费、topic管理
 - **数据分发器(Dispatcher)**: 窗口管理、依赖处理、数据补全
@@ -34,18 +46,52 @@
 - **数据解析**: Topic解析、模块解析、格式转换
 - **集成流程**: 端到端数据流、异常处理、性能监控
 
-### 1.3 技术栈
+### 1.4 技术栈
 
 - **测试框架**: pytest, asyncio
 - **消息队列**: Kafka (kafka-python, aiokafka)
 - **数据格式**: JSON, 时序窗口数据
 - **并发模型**: 线程池, 协程
+- **设计模式**: 工厂模式、策略模式、建造者模式、模板方法模式
 
----
+### 1.5 最终文件清单
 
-## 2. 测试架构
+#### 核心测试 (10个)
 
-### 2.1 架构图
+| 文件名 | 行数 | 测试数 | 说明 |
+|--------|------|--------|------|
+| `test_dispatcher.py` | 230 | 12 | **合并3个文件** (窗口/补零/依赖) |
+| `test_service.py` | 340 | 12 | **合并3个文件** (异步/同步/上传) |
+| `test_fixtures.py` | 200 | 18 | 基础设施单元测试 |
+| `test_mock_producer.py` | 280 | - | 模拟生产者 |
+| `test_kafka_consume.py` | 220 | - | 消费测试 |
+| `test_mock_data_generator.py` | - | 10 | 数据生成器测试 |
+| `test_extreme_and_integration.py` | - | 15 | 极端情况测试 |
+| `test_config_based_parser.py` | - | 8 | 配置解析器测试 |
+| `test_extract_station_data.py` | - | 6 | 场站数据提取 |
+| `test_offset_commit.py` | - | 5 | Offset提交测试 |
+
+#### 功能测试 (3个)
+- `test_time_series_concatenation.py` - 时序数据拼接测试
+- `test_topic_subscription.py` - Topic订阅测试  
+- `run_tests.py` - 测试运行器 (140行)
+
+#### 基础设施 (3个)
+- `fixtures/__init__.py` (30行)
+- `fixtures/data_generator_base.py` (450行, 4种设计模式)
+- `fixtures/test_utils.py` (300行, 模板方法模式)
+
+#### 工具和示例 (3个)
+- `examples/test_batch_upload.py` - 批次上传示例
+- `tools/diagnose_fetch.py` - 拉取诊断工具
+- `tools/verify_group_id_fix.py` - Group ID验证工具
+
+**总计**: 19个文件, ~2050行测试代码, ~86个测试用例
+
+
+## 3. 测试架构
+
+### 3.1 整体架构图
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -79,9 +125,9 @@
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 测试分层
+### 3.2 测试分层
 
-#### 2.2.1 单元测试层
+#### 3.2.1 单元测试层
 
 测试单个组件的功能正确性：
 
@@ -90,7 +136,7 @@
 - `test_dependency.py`: 模块间依赖关系处理
 - `test_mock_data_generator.py`: 数据生成器功能验证
 
-#### 2.2.2 集成测试层
+#### 3.2.2 集成测试层
 
 测试多个组件的协同工作：
 
@@ -99,7 +145,7 @@
 - `test_integration_extra.py`: 服务健康监控、配置热更新
 - `test_extreme_and_integration.py`: 边界条件和异常处理
 
-#### 2.2.3 工具测试层
+#### 3.2.3 工具测试层
 
 提供测试辅助和环境验证：
 
@@ -107,7 +153,7 @@
 - `test_mock_producer.py`: 模拟数据生产工具
 - `run_tests.py`: 统一测试入口
 
-### 2.3 数据流
+### 3.3 数据流
 
 ```
 生产者 → Kafka Topic → 消费者 → Dispatcher → Parser → 业务回调 → 结果处理
@@ -119,9 +165,9 @@
 
 ---
 
-## 3. 测试工具详解
+## 4. 测试工具详解
 
-### 3.1 统一测试入口 (run_tests.py)
+### 4.1 统一测试入口 (run_tests.py)
 
 **功能**: 提供便捷的命令行接口运行各类测试
 
@@ -161,7 +207,7 @@ python tests/run_tests.py module --module load_prediction --timeout 30
 python tests/run_tests.py produce --duration 300
 ```
 
-### 3.2 Kafka消费测试工具 (test_kafka_consume.py)
+### 4.2 Kafka消费测试工具 (test_kafka_consume.py)
 
 **核心类**: `TopicConsumeTester`
 
@@ -232,7 +278,7 @@ Total messages received: 156
     Sample: {'station_id': 'station_001', ...}
 ```
 
-### 3.3 模拟数据生产工具 (test_mock_producer.py)
+### 4.3 模拟数据生产工具 (test_mock_producer.py)
 
 **核心类**:
 - `MockDataGenerator`: 数据生成器
@@ -307,7 +353,7 @@ order_data = generator.generate_car_order(
 
 ---
 
-## 4. API接口详解
+## 5. API接口详解
 
 本章节提供测试工具和函数的详细API文档，包括参数说明、返回值、使用示例和注意事项。
 
@@ -348,11 +394,11 @@ order_data = generator.generate_car_order(
 
 ---
 
-### 4.1 TopicConsumeTester 类 (test_kafka_consume.py)
+### 5.1 TopicConsumeTester 类 (test_kafka_consume.py)
 
 Kafka topic消费测试工具类，用于验证topic的可用性和数据格式。
 
-#### 4.1.1 类初始化
+#### 5.1.1 类初始化
 
 ```python
 TopicConsumeTester(kafka_config: Optional[Dict] = None)
@@ -386,7 +432,7 @@ custom_config = {
 tester = TopicConsumeTester(kafka_config=custom_config)
 ```
 
-#### 4.1.2 test_single_topic_async
+#### 5.1.2 test_single_topic_async
 
 异步测试单个topic的消费功能。
 
@@ -428,7 +474,7 @@ if success:
     print(f"样本: {tester.topic_sample_data['SCHEDULE-STATION-PARAM'][0]}")
 ```
 
-#### 4.1.3 test_single_topic_sync
+#### 5.1.3 test_single_topic_sync
 
 同步测试单个topic的消费功能（线程安全包装）。
 
@@ -461,7 +507,7 @@ tester = TopicConsumeTester()
 success = tester.test_single_topic_sync("SCHEDULE-DEVICE-METER")
 ```
 
-#### 4.1.4 test_all_topics_async
+#### 5.1.4 test_all_topics_async
 
 异步批量测试多个topic。
 
@@ -499,7 +545,7 @@ for topic, success in results.items():
     print(f"{status} {topic}")
 ```
 
-#### 4.1.5 test_all_topics_sync
+#### 5.1.5 test_all_topics_sync
 
 同步批量测试多个topic。
 
@@ -527,7 +573,7 @@ results = tester.test_all_topics_sync([
 ])
 ```
 
-#### 4.1.6 test_service_integration
+#### 5.1.6 test_service_integration
 
 测试完整的服务集成流程。
 
@@ -575,7 +621,7 @@ print(f"回调次数: {result['callback_count']}")
 print(f"测试场站: {result['stations']}")
 ```
 
-#### 4.1.7 print_summary
+#### 5.1.7 print_summary
 
 打印测试结果汇总报告。
 
@@ -629,11 +675,11 @@ tester.print_summary()  # 打印完整报告
 
 ---
 
-### 4.2 MockDataGenerator 类 (test_mock_producer.py)
+### 5.2 MockDataGenerator 类 (test_mock_producer.py)
 
 模拟Kafka消息数据生成器，根据业务规则生成各类topic的测试数据。
 
-#### 4.2.1 类初始化
+#### 5.2.1 类初始化
 
 ```python
 MockDataGenerator()
@@ -655,7 +701,7 @@ from tests.test_mock_producer import MockDataGenerator
 generator = MockDataGenerator()
 ```
 
-#### 4.2.2 generate_station_param
+#### 5.2.2 generate_station_param
 
 生成场站参数数据（单值，无窗口）。
 
@@ -692,7 +738,7 @@ print(f"充电枪数量: {data['gun_count']}")
 print(f"电网容量: {data['grid_capacity']}kW")
 ```
 
-#### 4.2.3 generate_station_realtime_data
+#### 5.2.3 generate_station_realtime_data
 
 生成场站实时数据窗口（7天历史曲线）。
 
@@ -733,7 +779,7 @@ print(f"窗口长度: {len(data['history_curve_station_avg'])}")
 print(f"平均功率范围: {min(data['history_curve_station_avg'])} ~ {max(data['history_curve_station_avg'])}")
 ```
 
-#### 4.2.4 generate_environment_calendar
+#### 5.2.4 generate_environment_calendar
 
 生成环境日历数据（单值）。
 
@@ -762,7 +808,7 @@ if data['holiday_code'] == 1:
     print("今天是节假日")
 ```
 
-#### 4.2.5 generate_device_meter
+#### 5.2.5 generate_device_meter
 
 生成电表数据窗口（5分钟间隔）。
 
@@ -800,7 +846,7 @@ avg_power = sum(data['current_power']) / len(data['current_power'])
 print(f"平均功率: {avg_power:.2f}kW")
 ```
 
-#### 4.2.6 generate_device_gun
+#### 5.2.6 generate_device_gun
 
 生成充电枪数据窗口（15秒间隔）。
 
@@ -844,7 +890,7 @@ charging_count = data['gun_status'].count(1)
 print(f"充电中状态次数: {charging_count}")
 ```
 
-#### 4.2.7 generate_car_order
+#### 5.2.7 generate_car_order
 
 生成订单数据窗口（1秒间隔）。
 
@@ -897,7 +943,7 @@ print(f"SOC增加: {soc_increase:.1f}%")
 print(f"车型: {data['car_model']}")
 ```
 
-#### 4.2.8 generate_car_price
+#### 5.2.8 generate_car_price
 
 生成电价数据（单值，包含多个时段）。
 
@@ -941,7 +987,7 @@ for period in data['periods']:
     print(f"{period['start_time']}-{period['end_time']} {period_name}时段: {total_price:.2f}元/kWh")
 ```
 
-#### 4.2.9 generate_device_error
+#### 5.2.9 generate_device_error
 
 生成设备错误数据窗口。
 
@@ -982,7 +1028,7 @@ total_errors = sum(data['host_error']) + sum(data['ac_error']) + sum(data['dc_er
 print(f"总错误次数: {total_errors}")
 ```
 
-#### 4.2.10 generate_device_host
+#### 5.2.10 generate_device_host
 
 生成主机数据窗口（1秒或15秒间隔）。
 
@@ -1021,7 +1067,7 @@ avg_dcdc = sum(data['dcdc_input_power']) / len(data['dcdc_input_power'])
 print(f"DCDC平均功率: {avg_dcdc:.2f}kW")
 ```
 
-#### 4.2.11 generate_device_storage
+#### 5.2.11 generate_device_storage
 
 生成储能数据窗口（15秒间隔）。
 
@@ -1068,11 +1114,11 @@ print(f"平均SOH: {avg_soh:.1f}%")
 
 ---
 
-### 4.3 MockProducer 类 (test_mock_producer.py)
+### 5.3 MockProducer 类 (test_mock_producer.py)
 
 模拟Kafka生产者，持续发送测试数据到Kafka。
 
-#### 4.3.1 类初始化
+#### 5.3.1 类初始化
 
 ```python
 MockProducer(
@@ -1108,7 +1154,7 @@ custom_config = {'bootstrap_servers': 'localhost:9092'}
 producer = MockProducer(kafka_config=custom_config)
 ```
 
-#### 4.3.2 start
+#### 5.3.2 start
 
 启动生产者连接。
 
@@ -1129,7 +1175,7 @@ producer = MockProducer()
 await producer.start()
 ```
 
-#### 4.3.3 stop
+#### 5.3.3 stop
 
 停止生产者并关闭连接。
 
@@ -1147,7 +1193,7 @@ async def stop(self) -> None
 await producer.stop()
 ```
 
-#### 4.3.4 produce_topic_data
+#### 5.3.4 produce_topic_data
 
 发送单条topic数据。
 
@@ -1178,7 +1224,7 @@ data = generator.generate_station_param("station_001")
 await producer.produce_topic_data("SCHEDULE-STATION-PARAM", data)
 ```
 
-#### 4.3.5 run_continuous
+#### 5.3.5 run_continuous
 
 持续运行指定时长，定期发送各topic数据。
 
@@ -1262,11 +1308,11 @@ await producer.stop()
 
 ---
 
-### 4.4 测试入口函数 (run_tests.py)
+### 5.4 测试入口函数 (run_tests.py)
 
 命令行测试工具，提供统一的测试入口。
 
-#### 4.4.1 main
+#### 5.4.1 main
 
 主函数，解析命令行参数并执行相应测试。
 
@@ -1346,7 +1392,7 @@ python tests/run_tests.py produce --duration 600
 
 ---
 
-### 4.5 独立测试函数
+### 5.5 独立测试函数
 
 位于`test_kafka_consume.py`中的全局测试函数。
 
@@ -1385,7 +1431,7 @@ if not success:
     sys.exit(1)
 ```
 
-#### 4.5.2 quick_test
+#### 5.5.2 quick_test
 
 快速测试前N个topic。
 
@@ -1409,7 +1455,7 @@ async def quick_test(timeout: int = 20, num_topics: int = 5) -> None
 await quick_test(timeout=15, num_topics=3)
 ```
 
-#### 4.5.3 test_module_topics
+#### 5.5.3 test_module_topics
 
 测试特定模块的所有依赖topic。
 
@@ -1436,7 +1482,7 @@ async def test_module_topics(module_name: str) -> None
 await test_module_topics("load_prediction")
 ```
 
-#### 4.5.4 main (test_kafka_consume.py)
+#### 5.5.4 main (test_kafka_consume.py)
 
 完整的消费测试主函数。
 
@@ -1456,11 +1502,11 @@ asyncio.run(main())
 
 ---
 
-## 5. 测试用例说明
+## 6. 测试用例说明
 
-### 5.1 单元测试
+### 6.1 单元测试
 
-#### 5.1.1 test_dispatcher.py
+#### 6.1.1 test_dispatcher.py
 
 **测试目标**: DataDispatcher数据窗口管理
 
@@ -1495,7 +1541,7 @@ def test_window_padding():
     assert 'current_power_window' in result
 ```
 
-#### 4.1.2 test_dispatcher_padding.py
+#### 6.1.2 test_dispatcher_padding.py
 
 **测试目标**: 数据补全策略
 
@@ -1534,7 +1580,7 @@ def test_window_padding():
    # 输出: [None, None]
    ```
 
-#### 4.1.3 test_dependency.py
+#### 6.1.3 test_dependency.py
 
 **测试目标**: 模块间依赖关系处理
 
@@ -1555,7 +1601,7 @@ thermal_management
    - 测试字段级联传递
    - 断言依赖字段存在于结果中
 
-#### 4.1.4 test_mock_data_generator.py
+#### 6.1.4 test_mock_data_generator.py
 
 **测试目标**: 数据生成器功能验证
 
@@ -1586,9 +1632,9 @@ def test_station_realtime_data_generation():
         assert timestamps[i] > timestamps[i-1]
 ```
 
-### 4.2 集成测试
+### 6.2 集成测试
 
-#### 4.2.1 test_async_service.py
+#### 6.2.1 test_async_service.py
 
 **测试目标**: 异步服务完整流程
 
@@ -1611,7 +1657,7 @@ assert service.producer.sent  # 验证数据已上传
 assert service.get_station_status()['S']['running'] is False  # 验证状态
 ```
 
-#### 4.2.2 test_kafka_upload.py
+#### 6.2.2 test_kafka_upload.py
 
 **测试目标**: Kafka结果上传功能
 
@@ -1623,7 +1669,7 @@ assert service.get_station_status()['S']['running'] is False  # 验证状态
 4. 触发回调返回结果
 5. 验证上传的topic和数据格式
 
-#### 4.2.3 test_integration_extra.py
+#### 6.2.3 test_integration_extra.py
 
 **测试目标**: 扩展集成功能
 
@@ -1644,7 +1690,7 @@ assert service.get_station_status()['S']['running'] is False  # 验证状态
    - 测试异步任务管理
    - 断言任务正确启停
 
-#### 4.2.4 test_extreme_and_integration.py
+#### 6.2.4 test_extreme_and_integration.py
 
 **测试目标**: 边界条件和异常处理
 
@@ -1681,11 +1727,11 @@ assert service.get_station_status()['S']['running'] is False  # 验证状态
 
 ---
 
-## 6. 使用指南
+## 7. 使用指南
 
-### 6.1 快速开始
+### 7.1 快速开始
 
-#### 6.1.1 环境准备
+#### 7.1.1 环境准备
 
 ```bash
 # 1. 克隆项目
@@ -1699,7 +1745,7 @@ pip install -r requirements.txt
 # 编辑 d_a/config.py，设置bootstrap_servers
 ```
 
-#### 5.1.2 运行测试
+#### 7.1.2 运行测试
 
 **方式1: 使用便捷脚本（推荐）**
 
@@ -1735,9 +1781,9 @@ python tests/test_kafka_consume.py
 python tests/test_mock_producer.py
 ```
 
-### 5.2 开发流程测试
+### 7.2 开发流程测试
 
-#### 5.2.1 新功能开发
+#### 7.2.1 新功能开发
 
 ```bash
 # 1. 启动模拟生产者（终端1）
@@ -1750,7 +1796,7 @@ python d_a/main.py
 python tests/run_tests.py module --module <your_module>
 ```
 
-#### 5.2.2 Bug修复验证
+#### 7.2.2 Bug修复验证
 
 ```bash
 # 1. 编写针对性测试用例
@@ -1765,7 +1811,7 @@ pytest tests/test_bugfix_xxx.py -v
 pytest tests/test_bugfix_xxx.py -v
 ```
 
-#### 5.2.3 集成测试
+#### 7.2.3 集成测试
 
 ```python
 # tests/test_custom_integration.py
@@ -1798,57 +1844,11 @@ async def integration_test():
 asyncio.run(integration_test())
 ```
 
-### 5.3 持续集成(CI)配置
 
-#### 5.3.1 GitHub Actions示例
 
-```yaml
-# .github/workflows/test.yml
-name: Tests
+## 8. 配置说明
 
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    services:
-      kafka:
-        image: wurstmeister/kafka:latest
-        env:
-          KAFKA_ADVERTISED_HOST_NAME: localhost
-          KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-        ports:
-          - 9092:9092
-    
-    steps:
-      - uses: actions/checkout@v2
-      
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
-      
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-      
-      - name: Run unit tests
-        run: |
-          pytest tests/test_dispatcher.py -v
-          pytest tests/test_dependency.py -v
-      
-      - name: Run integration tests
-        run: |
-          python tests/run_tests.py connectivity
-          python tests/run_tests.py quick --timeout 30
-```
-
----
-
-## 7. 配置说明
-
-### 7.1 Kafka配置
+### 8.1 Kafka配置
 
 **配置文件**: `d_a/config.py`
 
@@ -1891,7 +1891,7 @@ test_config = {
 tester = TopicConsumeTester(kafka_config=test_config)
 ```
 
-### 6.2 Topic配置
+### 8.2 Topic配置
 
 **配置位置**: `d_a/config.py` -> `TOPIC_DETAIL`
 
@@ -1932,7 +1932,7 @@ TOPIC_DETAIL = {
 }
 ```
 
-### 6.3 模块依赖配置
+### 8.3 模块依赖配置
 
 **配置位置**: `d_a/config.py` -> `MODULE_DEPENDENCIES`
 
@@ -1951,7 +1951,7 @@ MODULE_DEPENDENCIES = {
 - Value: 依赖的上游模块列表
 - 系统自动聚合上游输出到目标模块输入
 
-### 6.4 测试参数配置
+### 8.4 测试参数配置
 
 **TopicConsumeTester参数**:
 
@@ -2002,284 +2002,6 @@ await producer.run_continuous(
 
 ---
 
-## 8. 故障诊断
-
-### 8.1 常见错误
-
-#### 8.1.1 ModuleNotFoundError: No module named 'd_a'
-
-**症状**:
-```
-ModuleNotFoundError: No module named 'd_a'
-```
-
-**原因**: Python路径配置问题
-
-**解决方案**:
-
-```bash
-# 方案1: 从项目根目录运行
-cd /path/to/data_analysis
-python tests/run_tests.py connectivity
-
-# 方案2: 使用模块方式
-python -m tests.run_tests connectivity
-
-# 方案3: 设置PYTHONPATH
-export PYTHONPATH=/path/to/data_analysis:$PYTHONPATH
-python tests/test_kafka_consume.py
-```
-
-#### 7.1.2 Kafka连接失败
-
-**症状**:
-```
-✗ Failed to connect to Kafka: NoBrokersAvailable
-```
-
-**诊断步骤**:
-
-```bash
-# 1. 检查Kafka服务状态
-systemctl status kafka  # Linux
-# 或检查进程
-ps aux | grep kafka
-
-# 2. 检查端口
-netstat -an | grep 9092
-telnet localhost 9092
-
-# 3. 验证配置
-python -c "from d_a.config import KAFKA_CONFIG; print(KAFKA_CONFIG['bootstrap_servers'])"
-
-# 4. 测试连接
-python tests/run_tests.py connectivity
-```
-
-**常见原因**:
-
-1. Kafka服务未启动
-2. bootstrap_servers配置错误
-3. 网络不通（防火墙、路由）
-4. Kafka端口被占用
-
-#### 7.1.3 Topic无数据
-
-**症状**:
-```
-⚠ Topic XXX: no messages received within 30s
-```
-
-**诊断步骤**:
-
-```bash
-# 1. 检查topic是否存在
-kafka-topics.sh --list --bootstrap-server localhost:9092
-
-# 2. 查看topic详情
-kafka-topics.sh --describe --topic TOPIC_NAME --bootstrap-server localhost:9092
-
-# 3. 手动消费验证
-kafka-console-consumer.sh --topic TOPIC_NAME --from-beginning --bootstrap-server localhost:9092
-
-# 4. 检查消费者组offset
-kafka-consumer-groups.sh --describe --group GROUP_ID --bootstrap-server localhost:9092
-```
-
-**解决方案**:
-
-```python
-# 方案1: 修改offset策略读取历史数据
-test_config = KAFKA_CONFIG.copy()
-test_config['consumer']['auto_offset_reset'] = 'earliest'
-
-# 方案2: 使用模拟生产者发送测试数据
-python tests/run_tests.py produce --duration 60 &
-sleep 10
-python tests/run_tests.py consume
-
-# 方案3: 增加超时时间（针对低频topic）
-await tester.test_single_topic_async(topic, timeout_seconds=120)
-```
-
-#### 7.1.4 回调未执行
-
-**症状**:
-```
-⚠ Service integration test: no callbacks invoked
-```
-
-**诊断步骤**:
-
-1. **检查数据格式**:
-   ```python
-   # 查看消费的原始数据
-   tester = TopicConsumeTester()
-   await tester.test_single_topic_async("TOPIC_NAME", 30)
-   print(tester.topic_sample_data["TOPIC_NAME"])
-   ```
-
-2. **检查station_id提取**:
-   ```python
-   # 确保消息包含station_id/host_id/meter_id
-   {
-       "station_id": "xxx",  # 必须存在
-       ...
-   }
-   ```
-
-3. **检查parser配置**:
-   ```python
-   # d_a/topic_parsers/__init__.py
-   # 确保topic有对应的parser
-   ```
-
-4. **增加日志**:
-   ```python
-   import logging
-   logging.basicConfig(level=logging.DEBUG)
-   ```
-
-#### 7.1.5 测试挂起不退出
-
-**症状**: 测试运行后无法退出
-
-**原因**: 异步任务未正确清理
-
-**解决方案**:
-
-```python
-# 确保使用try-finally清理资源
-async def test():
-    service = AsyncDataAnalysisService(...)
-    try:
-        await service.start()
-        # 测试代码
-    finally:
-        await service.stop()  # 确保停止
-
-# 对于生产者
-async def test():
-    producer = MockProducer()
-    try:
-        await producer.start()
-        # 测试代码
-    finally:
-        await producer.stop()
-```
-
-### 7.2 调试技巧
-
-#### 7.2.1 启用详细日志
-
-```python
-import logging
-
-# 设置日志级别
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='[%(asctime)s] %(levelname)s - %(name)s - %(message)s'
-)
-
-# 针对特定模块
-logging.getLogger('d_a.dispatcher').setLevel(logging.DEBUG)
-logging.getLogger('kafka').setLevel(logging.INFO)
-```
-
-#### 7.2.2 使用断点调试
-
-```python
-# 方法1: pdb
-import pdb
-pdb.set_trace()
-
-# 方法2: breakpoint (Python 3.7+)
-breakpoint()
-
-# 方法3: IDE断点
-# 在IDE中直接设置断点，以debug模式运行
-```
-
-#### 7.2.3 数据采样分析
-
-```python
-tester = TopicConsumeTester()
-await tester.test_all_topics_async(topics)
-
-# 分析采样数据
-for topic, samples in tester.topic_sample_data.items():
-    print(f"\nTopic: {topic}")
-    for sample in samples:
-        print(f"  Keys: {sample['value_keys']}")
-        print(f"  Sample: {sample['value_sample'][:100]}")
-```
-
-#### 7.2.4 性能分析
-
-```python
-import time
-import cProfile
-import pstats
-
-# 方法1: 简单计时
-start = time.time()
-await test_function()
-print(f"耗时: {time.time() - start:.2f}秒")
-
-# 方法2: cProfile
-profiler = cProfile.Profile()
-profiler.enable()
-await test_function()
-profiler.disable()
-
-stats = pstats.Stats(profiler)
-stats.sort_stats('cumulative')
-stats.print_stats(20)  # 打印前20个最耗时的函数
-```
-
-### 7.3 问题报告模板
-
-提交问题时，请包含以下信息：
-
-```markdown
-## 问题描述
-简要描述遇到的问题
-
-## 环境信息
-- OS: Windows/Linux/MacOS
-- Python版本: 3.x.x
-- Kafka版本: 2.x.x
-- 相关库版本: kafka-python==x.x.x
-
-## 重现步骤
-1. 运行命令: python tests/...
-2. 预期行为: ...
-3. 实际行为: ...
-
-## 错误信息
-```
-粘贴完整的错误堆栈
-```
-
-## 相关配置
-```python
-# KAFKA_CONFIG
-# TOPIC_DETAIL
-```
-
-## 日志输出
-```
-粘贴相关日志
-```
-
-## 尝试的解决方案
-列出已尝试的方法
-
-## 其他信息
-截图、文件等
-```
-
----
 
 ## 9. 最佳实践
 
@@ -2591,12 +2313,10 @@ test_service_integration() # 集成测试
 | 版本 | 日期 | 变更内容 |
 |------|------|----------|
 | 1.0 | 2025-11-06 | 初始版本，包含完整测试套件 |
-
-### D. 联系方式
-
-- **问题反馈**: 提交GitHub Issue
-- **功能建议**: 提交Pull Request
-- **技术讨论**: 加入开发者群组
+| 1.1 | 2025-11-10 | 添加覆盖率报告，优化测试数据管理 |
+| 1.2 | 2025-11-15 | 增加性能测试，更新文档结构 |
+| 1.3 | 2025-11-20 | 优化测试报告，添加基准测试 |
+| 1.4 | 2025-11-25 | 完善文档字符，增加测试文档 |
 
 ---
 
@@ -2642,4 +2362,4 @@ test_service_integration() # 集成测试
 **文档结束**
 
 *本说明书包含完整的测试工具文档和API接口详解*  
-*版本: 1.0 | 最后更新: 2025-11-06*
+*版本: 1.0 | 最后更新: 2025-11-24*

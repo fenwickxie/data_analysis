@@ -61,7 +61,7 @@ class AsyncDataAnalysisService(ServiceBase):
             data_expire_seconds=data_expire_seconds,
         )
 
-        self.dispatcher = DataDispatcher(data_expire_seconds,False)
+        self.dispatcher = DataDispatcher(data_expire_seconds, False)
         self.consumer = AsyncKafkaConsumerClient(self.topics, self.kafka_config)
 
         # Offset管理器
@@ -113,6 +113,8 @@ class AsyncDataAnalysisService(ServiceBase):
             "SCHEDULE-DEVICE-HOST-DCDC": self._handle_device_host_dcdc,
             "SCHEDULE-DEVICE-HOST-ACDC": self._handle_device_host_acdc,
             "SCHEDULE-DEVICE-STORAGE": self._handle_device_storage,
+            "SCHEDULE-ENVIRONMENT-WEATHER": self._handle_environment_weather,
+            "SCHEDULE-DEVICE-PV": self._handle_device_pv,
         }
 
         # 自动添加模型输出topic处理器
@@ -178,6 +180,17 @@ class AsyncDataAnalysisService(ServiceBase):
         """
         处理 SCHEDULE-ENVIRONMENT-CALENDAR
         格式: {'calendar': [...]}
+        全局数据，无 stationId
+        """
+        if not isinstance(value, dict):
+            return []
+        return [("__global__", value)]
+
+    @staticmethod
+    def _handle_environment_weather(value):
+        """
+        处理 SCHEDULE-ENVIRONMENT-WEATHER
+        格式: {'weather': [...]}
         全局数据，无 stationId
         """
         if not isinstance(value, dict):
@@ -304,6 +317,20 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_storage(value):
         """
         处理 SCHEDULE-DEVICE-STORAGE
+        格式: {'stationId': '...', ...}
+        """
+        if not isinstance(value, dict):
+            return []
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
+
+    @staticmethod
+    def _handle_device_pv(value):
+        """
+        处理 SCHEDULE-DEVICE-PV
         格式: {'stationId': '...', ...}
         """
         if not isinstance(value, dict):

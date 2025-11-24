@@ -20,6 +20,8 @@ from .device_error import DeviceErrorParser
 from .device_host import DeviceHostDCDCParser,DeviceHostACDCParser
 from .device_storage import DeviceStorageParser
 from .model_output import ModelOutputParser
+from .environment_weather import EnvironmentWeatherParser
+from .device_pv import DevicePvParser
 
 __all__ = [
     'StationParamParser',
@@ -34,4 +36,6 @@ __all__ = [
     'DeviceHostACDCParser',
     'DeviceStorageParser',
     'ModelOutputParser',
+    'EnvironmentWeatherParser',
+    'DevicePvParser',
 ]
