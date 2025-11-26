@@ -127,7 +127,7 @@ TOPIC_DETAIL = {
         'window_size': 1
     },
     'SCHEDULE-ENVIRONMENT-WEATHER': {
-        'fields':['weatherSituationYesterday','seasonTomorrow','weatherSituationTomorrow'],
+        'fields':['stationId','weatherSituationYesterday','seasonTomorrow','weatherSituationTomorrow'],
         'frequency': '一天1次',
         'modules': ['pv_prediction'],
         'window_size': 1

@@ -193,7 +193,7 @@ class DataDispatcher:
     def _update_environment_weather(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-ENVIRONMENT-WEATHER
-        特点：全局数据，window_size=1，直接追加
+        特点：天气数据分厂站，window_size=1，直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True

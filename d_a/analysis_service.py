@@ -189,13 +189,16 @@ class AsyncDataAnalysisService(ServiceBase):
     @staticmethod
     def _handle_environment_weather(value):
         """
-        处理 SCHEDULE-ENVIRONMENT-WEATHER
-        格式: {'weather': [...]}
-        全局数据，无 stationId
+        处理 SCHEDULE-ENVIRONMENT-WEATHER，天气数据分厂站
+        格式: {"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str}
         """
         if not isinstance(value, dict):
             return []
-        return [("__global__", value)]
+
+        station_id = value.get("stationId")
+        if station_id:
+            return [(station_id, value)]
+        return []
 
     @staticmethod
     def _handle_device_meter(value):

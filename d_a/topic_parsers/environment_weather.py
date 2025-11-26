@@ -24,7 +24,7 @@ class EnvironmentWeatherParser(ConfigBasedParser):
     def parse(self, raw_data):
         """
         解析天气数据
-        Args: raw_data: {'weatherSituationYesterday':str,'seasonTomorrow':str,'weatherSituationTomorrow':str}
+        Args: raw_data: {'stationId':str,'weatherSituationYesterday':str,'seasonTomorrow':str,'weatherSituationTomorrow':str}
 
         Returns: dict: 提取配置字段的数据
         """
@@ -43,15 +43,15 @@ class EnvironmentWeatherParser(ConfigBasedParser):
     def parse_window(self, window_data):
         """
         天气参数通常只需要最新的数据
-        
+
         Args:
             window_data: list of raw_data
-            
+
         Returns:
             dict: 解析后的数据
         """
         if not window_data:
             return None
-        
+
         # 使用窗口中最新的数据（最后一个元素）
         return self.parse(window_data[-1])
