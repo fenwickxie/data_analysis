@@ -3,7 +3,7 @@
 
 """
 批次结果聚合器
-负责收集同一批数据中多个场站的输出结果，并在超时或全部完成后统一上传
+负责收集同一批数据中多个场站的输出结果,并在超时或全部完成后统一上传
 """
 
 import asyncio
@@ -31,7 +31,7 @@ class BatchResultAggregator:
     ):
         """
         Args:
-            batch_timeout: 批次超时时间（秒），超时后即使部分场站未完成也会上传
+            batch_timeout: 批次超时时间（秒）,超时后即使部分场站未完成也会上传
             cleanup_interval: 清理过期批次的间隔（秒）
         """
         self.batch_timeout = batch_timeout
@@ -60,7 +60,7 @@ class BatchResultAggregator:
         """
         async with self._lock:
             if batch_id in self._batches:
-                logging.warning(f"批次 {batch_id} 已存在，返回现有批次")
+                logging.warning(f"批次 {batch_id} 已存在,返回现有批次")
                 return self._batches[batch_id]
             
             collector = BatchCollector(
@@ -74,12 +74,12 @@ class BatchResultAggregator:
             # 启动批次超时监控
             asyncio.create_task(self._monitor_batch(batch_id, collector))
             
-            logging.info(f"创建批次 {batch_id}，期望场站数: {len(expected_stations)}")
+            logging.info(f"创建批次 {batch_id},期望场站数: {len(expected_stations)}")
             return collector
     
     async def _monitor_batch(self, batch_id: str, collector: 'BatchCollector'):
         """
-        监控批次，超时后触发上传
+        监控批次,超时后触发上传
         """
         try:
             # 等待批次完成或超时
@@ -90,7 +90,7 @@ class BatchResultAggregator:
         except asyncio.TimeoutError:
             # 超时：强制完成批次
             logging.warning(
-                f"批次 {batch_id} 超时 ({self.batch_timeout}秒)，"
+                f"批次 {batch_id} 超时 ({self.batch_timeout}秒),"
                 f"已完成 {collector.completed_count}/{collector.expected_count} 个场站"
             )
             await collector.force_complete()
@@ -171,22 +171,22 @@ class BatchCollector:
         
         Args:
             station_id: 场站ID
-            result: 场站输出结果（可以是None，表示该场站处理失败）
+            result: 场站输出结果（可以是None,表示该场站处理失败）
         """
         async with self._lock:
             if self._uploaded:
-                logging.warning(f"批次 {self.batch_id} 已上传，忽略场站 {station_id} 的结果")
+                logging.warning(f"批次 {self.batch_id} 已上传,忽略场站 {station_id} 的结果")
                 return
             
             self._results[station_id] = result
             logging.debug(
-                f"批次 {self.batch_id} 收到场站 {station_id} 结果，"
+                f"批次 {self.batch_id} 收到场站 {station_id} 结果,"
                 f"进度: {len(self._results)}/{self.expected_count}"
             )
             
             # 检查是否所有期望的场站都已完成
             if len(self._results) >= self.expected_count:
-                logging.info(f"批次 {self.batch_id} 所有场站已完成，触发上传")
+                logging.info(f"批次 {self.batch_id} 所有场站已完成,触发上传")
                 asyncio.create_task(self._do_upload())
     
     @property
@@ -203,7 +203,7 @@ class BatchCollector:
         async with self._lock:
             if not self._uploaded:
                 logging.info(
-                    f"强制完成批次 {self.batch_id}，"
+                    f"强制完成批次 {self.batch_id},"
                     f"已完成 {len(self._results)}/{self.expected_count} 个场站"
                 )
                 await self._do_upload()
@@ -234,7 +234,7 @@ class BatchCollector:
             # 调用上传回调
             if self.upload_callback:
                 result = self.upload_callback(self.batch_id, results_list)
-                # 如果是协程，await它
+                # 如果是协程,await它
                 if asyncio.iscoroutine(result):
                     await result
         except Exception as exc:

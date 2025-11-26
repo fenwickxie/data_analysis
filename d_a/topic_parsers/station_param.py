@@ -15,7 +15,7 @@ class StationParamParser(ConfigBasedParser):
 
     def parse(self, raw_data):
         """
-        解析站点参数数据，处理嵌套的 power 对象
+        解析站点参数数据,处理嵌套的 power 对象
 
         Args:
             raw_data: {
@@ -42,7 +42,7 @@ class StationParamParser(ConfigBasedParser):
             if field in raw_data:
                 parsed_data[field] = raw_data[field]
 
-        # # 特殊处理：如果有 power 对象但配置中包含 meterId，尝试提取
+        # # 特殊处理：如果有 power 对象但配置中包含 meterId,尝试提取
         # if 'meterId' in self.fields and 'power' in raw_data:
         #     power_obj = raw_data['power']
         #     if isinstance(power_obj, dict) and 'powerIds' in power_obj:

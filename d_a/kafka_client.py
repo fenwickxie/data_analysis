@@ -100,7 +100,7 @@ class KafkaConsumerClient:
                     raise
                 handle_error(
                     KafkaConnectionError(e),
-                    context=f"KafkaConsumer连接失败，重试{i+1}/{self.max_retries}",
+                    context=f"KafkaConsumer连接失败,重试{i+1}/{self.max_retries}",
                 )
                 time.sleep(self.retry_interval)
 
@@ -112,12 +112,12 @@ class KafkaConsumerClient:
                 return self.consumer.poll(timeout_ms=timeout_ms)
             else:
                 handle_error(
-                    KafkaConnectionError("KafkaConsumer为None，无法poll"),
+                    KafkaConnectionError("KafkaConsumer为None,无法poll"),
                     context="poll失败",
                 )
                 return {}
         except Exception as e:
-            handle_error(e, context="KafkaConsumer poll异常，尝试重连")
+            handle_error(e, context="KafkaConsumer poll异常,尝试重连")
             self._connect()
             if self.consumer is not None:
                 return self.consumer.poll(timeout_ms=timeout_ms)
@@ -199,7 +199,7 @@ class KafkaProducerClient:
                     raise
                 handle_error(
                     KafkaConnectionError(e),
-                    context=f"KafkaProducer连接失败，重试{i+1}/{self.max_retries}",
+                    context=f"KafkaProducer连接失败,重试{i+1}/{self.max_retries}",
                 )
                 time.sleep(self.retry_interval)
 
@@ -214,19 +214,19 @@ class KafkaProducerClient:
                     return
                 else:
                     handle_error(
-                        KafkaConnectionError("KafkaProducer为None，无法send"),
+                        KafkaConnectionError("KafkaProducer为None,无法send"),
                         context="send失败",
                     )
             except Exception as e:
                 handle_error(
-                    e, context=f"KafkaProducer发送异常，重试{i+1}/{self.max_retries}"
+                    e, context=f"KafkaProducer发送异常,重试{i+1}/{self.max_retries}"
                 )
                 self._connect()
         handle_error(
-            KafkaConnectionError("KafkaProducer发送失败，重试多次后仍失败"),
+            KafkaConnectionError("KafkaProducer发送失败,重试多次后仍失败"),
             context="send失败",
         )
-        raise Exception("KafkaProducer发送失败，重试多次后仍失败")
+        raise Exception("KafkaProducer发送失败,重试多次后仍失败")
 
     def close(self):
         if self.producer:
@@ -295,7 +295,7 @@ class AsyncKafkaConsumerClient:
         if self._multi_consumer_mode and len(self.topics) > 1:
             # 多消费者模式：为每个topic创建独立的消费者
             logging.info(
-                f"启用多消费者模式，为 {len(self.topics)} 个topic创建独立消费者（并发启动）"
+                f"启用多消费者模式,为 {len(self.topics)} 个topic创建独立消费者（并发启动）"
             )
 
             # 获取基础配置
@@ -308,7 +308,7 @@ class AsyncKafkaConsumerClient:
                 topic_kwargs = base_kwargs.copy()
                 topic_kwargs["max_poll_records"] = per_topic_max_records
                 # 所有消费者使用相同的 group_id（多消费者模式）
-                # 注意：如果从单消费者模式切换到多消费者模式，建议修改 group_id 避免使用旧的 offset
+                # 注意：如果从单消费者模式切换到多消费者模式,建议修改 group_id 避免使用旧的 offset
                 topic_kwargs["group_id"] = base_group_id
                 
                 consumer = AIOKafkaConsumer(
@@ -328,7 +328,7 @@ class AsyncKafkaConsumerClient:
                 )
                 return topic, consumer
 
-            # 并发启动所有消费者，避免逐个加入触发多次 rebalance
+            # 并发启动所有消费者,避免逐个加入触发多次 rebalance
             logging.info(f"开始并发创建 {len(self.topics)} 个消费者...")
             results = await asyncio.gather(
                 *[create_consumer(topic) for topic in self.topics],
@@ -351,14 +351,14 @@ class AsyncKafkaConsumerClient:
                     self._topic_consumers[topic] = consumer
             
             logging.info(
-                f"所有消费者已启动完成，共 {len(self._topic_consumers)} 个，"
+                f"所有消费者已启动完成,共 {len(self._topic_consumers)} 个,"
                 f"使用同一个 group_id: {base_group_id}"
             )
         else:
             # 单消费者模式（原有逻辑）
             if self._multi_consumer_mode:
                 logging.warning(
-                    "多消费者模式需要订阅多个topic，当前只有1个topic，使用单消费者模式"
+                    "多消费者模式需要订阅多个topic,当前只有1个topic,使用单消费者模式"
                 )
 
             self.consumer = AIOKafkaConsumer(
@@ -391,7 +391,7 @@ class AsyncKafkaConsumerClient:
             # 并发拉取所有topic的消息
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # 合并所有消息，并统计每个 topic 的拉取情况
+            # 合并所有消息,并统计每个 topic 的拉取情况
             batch = []
             topic_stats = {}  # 统计每个 topic 拉取的消息数
             
@@ -414,7 +414,7 @@ class AsyncKafkaConsumerClient:
         else:
             # 单消费者模式（原有逻辑）
             if self.consumer is None:
-                raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
+                raise RuntimeError("AsyncKafkaConsumer 未启动,consumer为None")
         try:
             records = await self.consumer.getmany(
                 timeout_ms=timeout_ms, max_records=max_records
@@ -443,7 +443,7 @@ class AsyncKafkaConsumerClient:
             return []
 
     async def _fetch_from_consumer(self, consumer, timeout_ms, max_records):
-        """从单个消费者拉取消息，带 offset 越界处理"""
+        """从单个消费者拉取消息,带 offset 越界处理"""
         try:
             records = await consumer.getmany(
                 timeout_ms=timeout_ms, max_records=max_records
@@ -488,7 +488,7 @@ class AsyncKafkaConsumerClient:
                 except Exception as seek_error:
                     logging.error(f"重置 offset 失败: {seek_error}", exc_info=True)
             
-            return []  # 本次返回空，下次拉取将使用新 offset
+            return []  # 本次返回空,下次拉取将使用新 offset
             
         except Exception as e:
             logging.error(f"消费者拉取消息失败: {e}", exc_info=True)
@@ -540,7 +540,7 @@ class AsyncKafkaConsumerClient:
         else:
             # 单消费者模式（原有逻辑）
             if self.consumer is None:
-                raise RuntimeError("AsyncKafkaConsumer 未启动，consumer为None")
+                raise RuntimeError("AsyncKafkaConsumer 未启动,consumer为None")
 
             try:
                 if offsets:
@@ -602,7 +602,7 @@ class AsyncKafkaConsumerClient:
                         lag_info[topic] = {}
 
                     position = self.consumer.position(tp)
-                    # 注意：这需要同步调用，在异步环境中可能有问题
+                    # 注意：这需要同步调用,在异步环境中可能有问题
                     # 生产环境建议使用专门的监控工具
                     lag_info[topic][tp.partition] = {
                         "current_offset": position,
@@ -672,7 +672,7 @@ class AsyncKafkaProducerClient:
     async def send(self, topic, value):
         try:
             if self.producer is None:
-                raise RuntimeError("AsyncKafkaProducer 未启动，producer为None")
+                raise RuntimeError("AsyncKafkaProducer 未启动,producer为None")
             await self.producer.send_and_wait(topic, value)
         except Exception as e:
             logging.error(f"AsyncKafkaProducer send异常: {e}")

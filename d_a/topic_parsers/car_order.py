@@ -15,11 +15,11 @@ class CarOrderParser(ConfigBasedParser):
 
     def parse_window(self, window_data):
         """
-        重写窗口解析方法，实现枪号对齐
+        重写窗口解析方法,实现枪号对齐
 
         订单数据的特殊处理：
-        - window_size=2，保留2秒数据：上一秒（已完成）+ 当前秒（聚合中）
-        - 事件触发时，业务模块应处理上一秒已完成的聚合订单
+        - window_size=2,保留2秒数据：上一秒（已完成）+ 当前秒（聚合中）
+        - 事件触发时,业务模块应处理上一秒已完成的聚合订单
         - window_data = [[{order1}, {order2}], [{order3}]]
           - window_data[-2]: 上一秒已完成的聚合订单（应处理）
           - window_data[-1]: 当前秒聚合中的订单（不应处理）
@@ -27,10 +27,10 @@ class CarOrderParser(ConfigBasedParser):
         Args:
             window_data: 窗口内的原始数据列表
                 - 正常情况：[[order1, order2], [order3]] （2条记录）
-                - 初始情况：[[order1]] （只有1条记录，第一次触发）
+                - 初始情况：[[order1]] （只有1条记录,第一次触发）
 
         Returns:
-            list[dict]: 聚合后的订单数据，格式为：
+            list[dict]: 聚合后的订单数据,格式为：
             {"car_order":
                 [
                     {

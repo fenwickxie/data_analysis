@@ -26,7 +26,7 @@ version: 1.0
 
 
 # if __name__ == "__main__":
-#     # 指定本模型名，自动处理依赖、窗口、上传输出
+#     # 指定本模型名,自动处理依赖、窗口、上传输出
 #     service = DataAnalysisService(module_name="load_prediction")
 #     service.start(callback=my_callback)
 #     # ...业务主循环...
@@ -91,7 +91,7 @@ async def my_callback(station_id, module_input):
         return result
     except Exception as e:
         logging.error(f"场站 {station_id} 处理失败: {e}")
-        return None  # 返回None表示失败，不会阻塞批次上传
+        return None  # 返回None表示失败,不会阻塞批次上传
 
 
 async def main():
@@ -110,7 +110,7 @@ async def main():
 
         Args:
             batch_id: 批次ID
-            results_list: 成功场站的结果列表，每个元素是包含 station_id 的字典
+            results_list: 成功场站的结果列表,每个元素是包含 station_id 的字典
                 [
                     {"station_id": "S001", "result": 123, ...},
                     {"station_id": "S002", "result": 456, ...},
@@ -118,7 +118,7 @@ async def main():
                 ]
         """
         if not results_list:
-            logging.warning(f"批次 {batch_id} 没有成功的结果，跳过上传")
+            logging.warning(f"批次 {batch_id} 没有成功的结果,跳过上传")
             return
 
         payload = {
@@ -138,7 +138,7 @@ async def main():
     await service.start(callback=my_callback, batch_upload_handler=batch_upload_handler)
 
     try:
-        print("服务已启动，按 Ctrl+C 停止...")
+        print("服务已启动,按 Ctrl+C 停止...")
         print(f"多消费者模式: {service.consumer._multi_consumer_mode}")
         if service.consumer._multi_consumer_mode:
             print(f"订阅的 topic 数量: {len(service.consumer._topic_consumers)}")
@@ -174,8 +174,8 @@ async def main():
             for _ in range(10):
                 await asyncio.sleep(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as e:
-        print(f"\n程序被用户中断 ({type(e).__name__})，正在清理资源...")
-        logging.info(f"收到停止信号: {type(e).__name__}，开始停机...")
+        print(f"\n程序被用户中断 ({type(e).__name__}),正在清理资源...")
+        logging.info(f"收到停止信号: {type(e).__name__},开始停机...")
     finally:
         print("正在停止服务...")
         # 停止服务（会自动提交所有pending offsets）

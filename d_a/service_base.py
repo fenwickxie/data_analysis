@@ -12,7 +12,7 @@ from .dispatcher import DataDispatcher
 
 
 class ServiceBase:
-    """服务基类，包含同步和异步服务的公共逻辑"""
+    """服务基类,包含同步和异步服务的公共逻辑"""
 
     def __init__(self, module_name, topics, kafka_config, data_expire_seconds):
         """
@@ -63,13 +63,13 @@ class ServiceBase:
             default_topics = MODULE_TO_TOPICS.get(module_name)
             if not default_topics:
                 raise ValueError(
-                    f"模块 '{module_name}' 未配置 topics，请在 config.py 的 MODULE_TO_TOPICS 中添加"
+                    f"模块 '{module_name}' 未配置 topics,请在 config.py 的 MODULE_TO_TOPICS 中添加"
                 )
             return list(dict.fromkeys(default_topics))
         else:
-            # 未指定模块名和 topics，订阅所有（仅用于调试）
+            # 未指定模块名和 topics,订阅所有（仅用于调试）
             logging.warning(
-                "未指定 module_name 或 topics，将订阅所有 topics，可能影响性能"
+                "未指定 module_name 或 topics,将订阅所有 topics,可能影响性能"
             )
             return list(TOPIC_TO_MODULES.keys())
 

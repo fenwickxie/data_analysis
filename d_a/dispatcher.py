@@ -56,8 +56,8 @@ class DataDispatcher:
     """
     数据分发与依赖处理核心类。
 
-    该类负责管理多场站数据窗口缓存，处理模块间依赖关系，
-    并将多topic数据整合为各业务模块所需格式。支持多种数据补全策略，
+    该类负责管理多场站数据窗口缓存,处理模块间依赖关系,
+    并将多topic数据整合为各业务模块所需格式。支持多种数据补全策略,
     并提供动态配置更新功能。
 
     主要功能：
@@ -68,16 +68,16 @@ class DataDispatcher:
     - 数据清理和过期处理
 
     Attributes:
-        data_cache (dict): 多场站窗口缓存，格式为 {station_id: {topic: deque[(data, ts)]}}
+        data_cache (dict): 多场站窗口缓存,格式为 {station_id: {topic: deque[(data, ts)]}}
         data_expire_seconds (int): 数据过期时间(秒)
-        lock (threading.Lock): 线程锁，确保线程安全
-        padding_strategy (str): 窗口补全策略，默认为"zero"
+        lock (threading.Lock): 线程锁,确保线程安全
+        padding_strategy (str): 窗口补全策略,默认为"zero"
         parsers (dict): 业务模块解析器映射
     """
 
     def reload_config(self, config_mod):
         """
-        热加载config模块，动态更新topic、窗口、依赖等。
+        热加载config模块,动态更新topic、窗口、依赖等。
         """
         global TOPIC_DETAIL, TOPIC_PARSER_MAP, MODULE_DEPENDENCIES, MODULE_TO_TOPICS
         TOPIC_DETAIL = config_mod.TOPIC_DETAIL
@@ -97,18 +97,18 @@ class DataDispatcher:
 
     def __init__(self, data_expire_seconds=600, enable_data_expiration=True):
         """
-        初始化数据分发器，设置解析器和缓存参数。
+        初始化数据分发器,设置解析器和缓存参数。
 
-        创建分发器实例时会初始化所有业务模块解析器，
+        创建分发器实例时会初始化所有业务模块解析器,
         设置数据缓存结构和默认补全策略。
 
         Args:
-            data_expire_seconds (int, optional): 数据过期时间(秒)，默认为600。
+            data_expire_seconds (int, optional): 数据过期时间(秒),默认为600。
                 超过此时间未更新的场站数据将被自动清理。
-            enable_data_expiration (bool, optional): 是否启用数据过期清理，默认为True。
+            enable_data_expiration (bool, optional): 是否启用数据过期清理,默认为True。
                 设置为False时将不会自动清理过期数据。
         """
-        # 初始化解析器映射,经各topic parser梳理后的数据输入模块后的特殊处理逻辑，一般不需调用
+        # 初始化解析器映射,经各topic parser梳理后的数据输入模块后的特殊处理逻辑,一般不需调用
         self.parsers = {
             "electricity_price": ElectricityPriceParser(),
             "load_prediction": LoadPredictionParser(),
@@ -127,14 +127,14 @@ class DataDispatcher:
         self.lock = threading.RLock()
 
         # Topic更新策略映射
-        # 不再需要预定义集合，改为直接映射到处理方法
+        # 不再需要预定义集合,改为直接映射到处理方法
         self._topic_updaters = self._build_topic_updaters()
 
     def _build_topic_updaters(self):
         """
         构建 topic 到更新方法的映射
 
-        每个 topic 独立更新方法，直观明确，易于扩展
+        每个 topic 独立更新方法,直观明确,易于扩展
 
         Returns:
             dict: {topic: updater_function}
@@ -165,7 +165,7 @@ class DataDispatcher:
     def _update_station_param(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-STATION-PARAM
-        特点：window_size=1，单条数据，直接追加
+        特点：window_size=1,单条数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -173,8 +173,8 @@ class DataDispatcher:
     def _update_station_realtime_data(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-STATION-REALTIME-DATA
-        特点：window_size > 1，批量窗口数据，直接替换整个窗口
-        raw_data 是列表，包含多条记录（已按时间排序）
+        特点：window_size > 1,批量窗口数据,直接替换整个窗口
+        raw_data 是列表,包含多条记录（已按时间排序）
         """
         # 替换整个窗口（已按时间排序）
         self.data_cache[station_id][topic].clear()
@@ -185,7 +185,7 @@ class DataDispatcher:
     def _update_environment_calendar(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-ENVIRONMENT-CALENDAR
-        特点：全局数据，window_size=1，直接追加
+        特点：全局数据,window_size=1,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -193,7 +193,7 @@ class DataDispatcher:
     def _update_environment_weather(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-ENVIRONMENT-WEATHER
-        特点：天气数据分厂站，window_size=1，直接追加
+        特点：天气数据分厂站,window_size=1,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -201,7 +201,7 @@ class DataDispatcher:
     def _update_device_meter(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-METER
-        特点：window_size=1，单条数据，直接追加
+        特点：window_size=1,单条数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -209,7 +209,7 @@ class DataDispatcher:
     def _update_device_pv(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-PV
-        特点：window_size=1，单条数据，直接追加
+        特点：window_size=1,单条数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -217,7 +217,7 @@ class DataDispatcher:
     def _update_device_gun(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-GUN
-        特点：window_size=1，单条数据，直接追加
+        特点：window_size=1,单条数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -225,14 +225,14 @@ class DataDispatcher:
     def _update_car_order(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-CAR-ORDER
-        特点：window_size=2，订单聚合，同一秒聚合多个订单
+        特点：window_size=2,订单聚合,同一秒聚合多个订单
 
         工作流程：
-        1. 同一秒内：聚合订单到 deque[-1]，不触发事件
+        1. 同一秒内：聚合订单到 deque[-1],不触发事件
         2. 进入新的一秒：
-           - 触发事件（通知业务模块处理 deque[-2]，即上一秒已完成的聚合数据）
+           - 触发事件（通知业务模块处理 deque[-2],即上一秒已完成的聚合数据）
            - append 新订单到 deque（成为 deque[-1]）
-           - 旧数据自动保留在 deque[-2]，直到再次进入新的一秒
+           - 旧数据自动保留在 deque[-2],直到再次进入新的一秒
 
         Returns:
             bool: 是否应该触发数据就绪事件
@@ -243,7 +243,7 @@ class DataDispatcher:
             # 检查最后一条数据的时间戳（秒级）
             last_data, last_ts = self.data_cache[station_id][topic][-1]
 
-            # 如果时间戳相同（秒级），聚合数据
+            # 如果时间戳相同（秒级）,聚合数据
             if int(last_ts) == int(timestamp):
                 # 将 last_data 转换为列表（如果还不是）
                 if not isinstance(last_data, list):
@@ -255,19 +255,19 @@ class DataDispatcher:
                 # 更新最后一条记录
                 self.data_cache[station_id][topic][-1] = (last_data, timestamp)
 
-                # 同一秒内聚合，不触发事件
+                # 同一秒内聚合,不触发事件
                 should_trigger = False
             else:
-                # 时间戳不同，说明进入新的一秒
+                # 时间戳不同,说明进入新的一秒
                 should_trigger = True
 
                 # 添加新记录（包装为列表）
                 self.data_cache[station_id][topic].append(([raw_data], timestamp))
         else:
-            # 窗口为空，初始化（包装为列表）
+            # 窗口为空,初始化（包装为列表）
             self.data_cache[station_id][topic].append(([raw_data], timestamp))
 
-            # 第一条订单，触发事件（可能是唯一的订单）
+            # 第一条订单,触发事件（可能是唯一的订单）
             should_trigger = True
 
         return should_trigger
@@ -275,7 +275,7 @@ class DataDispatcher:
     def _update_car_price(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-CAR-PRICE
-        特点：window_size=1，单条数据，直接追加
+        特点：window_size=1,单条数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -283,7 +283,7 @@ class DataDispatcher:
     def _update_device_error(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-ERROR
-        特点：window_size=1，单条数据，直接追加
+        特点：window_size=1,单条数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -291,7 +291,7 @@ class DataDispatcher:
     def _update_device_host_dcdc(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-HOST-DCDC
-        特点：场站内多个 DCDC 主机设备，每个设备1秒间隔独立上传，需要聚合
+        特点：场站内多个 DCDC 主机设备,每个设备1秒间隔独立上传,需要聚合
 
         数据结构：
         deque([{
@@ -301,9 +301,9 @@ class DataDispatcher:
         }], maxlen=1)
 
         工作流程：
-        1. 每个 DCDC 主机设备消息到达时，更新该设备在聚合字典中的数据
+        1. 每个 DCDC 主机设备消息到达时,更新该设备在聚合字典中的数据
         2. 每次更新都触发事件（业务模块会获取所有主机设备的最新数据）
-        3. 设备每1秒上传一次，自动覆盖旧数据
+        3. 设备每1秒上传一次,自动覆盖旧数据
 
         Args:
             raw_data: {'stationId': '...', 'hostCode': '...', 'dcWorkStatus': [...], ...}
@@ -325,7 +325,7 @@ class DataDispatcher:
             # 获取当前聚合字典（引用）
             host_dict = self.data_cache[station_id][topic][0]
 
-            # 更新该主机设备的数据（1秒间隔自动覆盖），引用数据类型修改，会直接修改缓存中的字典
+            # 更新该主机设备的数据（1秒间隔自动覆盖）,引用数据类型修改,会直接修改缓存中的字典
             host_dict[host_id] = (raw_data, timestamp)
 
             # 每次有主机设备更新都触发事件
@@ -340,7 +340,7 @@ class DataDispatcher:
     def _update_device_host_acdc(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-HOST-ACDC
-        特点：场站内多个 ACDC 主机设备，每个设备1秒间隔独立上传，需要聚合
+        特点：场站内多个 ACDC 主机设备,每个设备1秒间隔独立上传,需要聚合
 
         数据结构：
         deque([{
@@ -350,9 +350,9 @@ class DataDispatcher:
         }], maxlen=1)
 
         工作流程：
-        1. 每个 ACDC 主机设备消息到达时，更新该设备在聚合字典中的数据
+        1. 每个 ACDC 主机设备消息到达时,更新该设备在聚合字典中的数据
         2. 每次更新都触发事件（业务模块会获取所有主机设备的最新数据）
-        3. 设备每1秒上传一次，自动覆盖旧数据
+        3. 设备每1秒上传一次,自动覆盖旧数据
 
         Args:
             raw_data: {'stationId': '...', 'hostCode': '...', 'acPower': ..., ...}
@@ -389,7 +389,7 @@ class DataDispatcher:
     def _update_device_storage(self, station_id, topic, raw_data, timestamp):
         """
         更新 SCHEDULE-DEVICE-STORAGE
-        特点：场站内多个储能设备，每个设备15秒间隔独立上传，需要聚合
+        特点：场站内多个储能设备,每个设备15秒间隔独立上传,需要聚合
 
         数据结构：
         deque([{
@@ -399,9 +399,9 @@ class DataDispatcher:
         }], maxlen=1)
 
         工作流程：
-        1. 每个储能设备消息到达时，更新该设备在聚合字典中的数据
+        1. 每个储能设备消息到达时,更新该设备在聚合字典中的数据
         2. 每次更新都触发事件（业务模块会获取所有储能设备的最新数据）
-        3. 设备每15秒上传一次，自动覆盖旧数据
+        3. 设备每15秒上传一次,自动覆盖旧数据
 
         Args:
             raw_data: {'stationId': '...', 'storageCode': '...', 'batteryGroupSoc': 12, ...}
@@ -439,7 +439,7 @@ class DataDispatcher:
     def _update_model_output(self, station_id, topic, raw_data, timestamp):
         """
         更新模型输出 topic (MODULE-OUTPUT-*)
-        特点：window_size=1，模型输出数据，直接追加
+        特点：window_size=1,模型输出数据,直接追加
         """
         self.data_cache[station_id][topic].append((raw_data, timestamp))
         return True
@@ -454,12 +454,12 @@ class DataDispatcher:
             station_id (str): 场站ID
             topic (str): topic名称
             raw_data (dict or list): 原始数据（单条dict或窗口数据list）
-            timestamp (float, optional): Kafka消息时间戳（秒），默认使用当前时间
+            timestamp (float, optional): Kafka消息时间戳（秒）,默认使用当前时间
 
         Returns:
             bool: 是否应该触发数据就绪事件
-                  - True: 数据已完整，可以触发事件通知业务模块
-                  - False: 数据聚合中（如订单类同一秒内聚合），暂不触发
+                  - True: 数据已完整,可以触发事件通知业务模块
+                  - False: 数据聚合中（如订单类同一秒内聚合）,暂不触发
         Raises:
             DispatcherError: 当数据更新失败时抛出
         """
@@ -481,8 +481,8 @@ class DataDispatcher:
                     # 调用对应的更新方法
                     return updater(station_id, topic, raw_data, ts)
                 else:
-                    # 未配置的 topic，使用默认策略（单条追加）
-                    logging.warning(f"未配置更新器的 topic: {topic}，使用默认策略")
+                    # 未配置的 topic,使用默认策略（单条追加）
+                    logging.warning(f"未配置更新器的 topic: {topic},使用默认策略")
                     self.data_cache[station_id][topic].append((raw_data, ts))
                     return True
 
@@ -491,14 +491,14 @@ class DataDispatcher:
                 DispatcherError(e),
                 context=f"窗口数据更新 station_id={station_id}, topic={topic}",
             )
-            return False  # 更新失败，不触发
+            return False  # 更新失败,不触发
 
     def get_topic_window(self, station_id, topic):
         """
         获取窗口数据
 
-        对于设备聚合类 topic（储能、DCDC、ACDC），直接返回聚合字典
-        对于其他 topic，返回 data 部分的列表
+        对于设备聚合类 topic（储能、DCDC、ACDC）,直接返回聚合字典
+        对于其他 topic,返回 data 部分的列表
 
         Args:
             station_id: 场站ID
@@ -537,19 +537,19 @@ class DataDispatcher:
 
     def get_module_input(self, station_id, module):
         """
-        整合该场站所有topic窗口数据，组装为模块输入（在这里完成解析）。
+        整合该场站所有topic窗口数据,组装为模块输入（在这里完成解析）。
 
         说明：
-        - 对于事件驱动模式，当最快频率topic更新时触发处理
+        - 对于事件驱动模式,当最快频率topic更新时触发处理
         - 慢速topic自动使用其最新缓存数据（不管数据新旧）
-        - 只需确保topic有数据即可，不检查数据新鲜度
+        - 只需确保topic有数据即可,不检查数据新鲜度
 
         Args:
             station_id (str): 场站ID
             module (str): 模块名称
 
         Returns:
-            dict: 模块输入数据，包含：
+            dict: 模块输入数据,包含：
                 - 业务字段：由各topic parser解析生成
                 - _data_quality: 数据可用性信息
                     - available_topics: 有数据的topic列表
@@ -563,7 +563,7 @@ class DataDispatcher:
                 if station_id not in self.data_cache:
                     return None
 
-                # 初始化输入数据字典，包含场站ID
+                # 初始化输入数据字典,包含场站ID
                 input_data = {"stationId": station_id}
 
                 # 数据可用性元信息（只关注是否有数据）
@@ -574,7 +574,7 @@ class DataDispatcher:
                     "availability_ratio": 0.0,  # 数据可用率
                 }
 
-                # 处理模块所需的topic数据，包含依赖的其他模块输出（通过Kafka topic获取）
+                # 处理模块所需的topic数据,包含依赖的其他模块输出（通过Kafka topic获取）
                 required_topics = MODULE_TO_TOPICS.get(module, [])
                 data_quality["total_topics"] = len(required_topics)
 
@@ -604,7 +604,7 @@ class DataDispatcher:
                                     context=f"解析窗口数据 topic={topic}, station_id={station_id}",
                                 )
                     else:
-                        # 窗口为空，没有任何数据
+                        # 窗口为空,没有任何数据
                         data_quality["missing_topics"].append(topic)
 
                 # 计算数据可用率
@@ -648,10 +648,10 @@ class DataDispatcher:
         """
         清理过期数据
 
-        对于设备聚合类 topic（储能、DCDC、ACDC），需要检查聚合字典内的设备时间戳
-        对于普通 topic，检查 (data, ts) 元组的时间戳
+        对于设备聚合类 topic（储能、DCDC、ACDC）,需要检查聚合字典内的设备时间戳
+        对于普通 topic,检查 (data, ts) 元组的时间戳
 
-        如果 enable_data_expiration=False，则不执行清理操作
+        如果 enable_data_expiration=False,则不执行清理操作
         """
         if not self.enable_data_expiration:
             return
@@ -686,7 +686,7 @@ class DataDispatcher:
                                     # 删除过期的设备
                                     del device_dict[device_id]
 
-                            # 如果所有设备都过期，清空整个deque
+                            # 如果所有设备都过期,清空整个deque
                             if all_expired or not device_dict:
                                 dq.clear()
                     else:
@@ -702,4 +702,4 @@ class DataDispatcher:
 
             for sid in expired_stations:
                 del self.data_cache[sid]
-                logging.info(f"场站 {sid} 数据已过期，已清理")
+                logging.info(f"场站 {sid} 数据已过期,已清理")

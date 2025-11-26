@@ -60,14 +60,14 @@ class DeviceHostDCDCParser(ConfigBasedParser):
         解析 DCDC 主机设备窗口数据（从聚合字典读取）
         
         Args:
-            window_data: [host_dict]，其中 host_dict = {
+            window_data: [host_dict],其中 host_dict = {
                 'host_id_1': (raw_data1, timestamp1),
                 'host_id_2': (raw_data2, timestamp2),
                 ...
             }
             
         Returns:
-            list: 所有 DCDC 主机设备的数据列表，格式为：
+            list: 所有 DCDC 主机设备的数据列表,格式为：
             [
                 {
                     'hostCode': 'H001',
@@ -143,14 +143,14 @@ class DeviceHostACDCParser(ConfigBasedParser):
         解析 ACDC 主机设备窗口数据（从聚合字典读取）
         
         Args:
-            window_data: [host_dict]，其中 host_dict = {
+            window_data: [host_dict],其中 host_dict = {
                 'host_id_1': (raw_data1, timestamp1),
                 'host_id_2': (raw_data2, timestamp2),
                 ...
             }
             
         Returns:
-            list: 所有 ACDC 主机设备的数据列表，格式为：
+            list: 所有 ACDC 主机设备的数据列表,格式为：
             [
                 {'hostCode': 'H001', 'acPower': 100.5},
                 {'hostCode': 'H002', 'acPower': 200.3},

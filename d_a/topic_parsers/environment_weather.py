@@ -10,7 +10,7 @@ version: 1.0
 """
 """
 天气数据解析器
-处理格式 {'weatherSituationYesterday':str,'seasonTomorrow':str,'weatherSituationTomorrow':str} 的全局天气数据
+处理格式 {'stationId':str,'weatherSituationYesterday':str,'seasonTomorrow':str,'weatherSituationTomorrow':str} 的全局天气数据
 """
 from ..parser_base import ConfigBasedParser
 

@@ -42,7 +42,7 @@ from .batch_result_aggregator import BatchResultAggregator
 
 
 class AsyncDataAnalysisService(ServiceBase):
-    """异步数据解析服务，负责消费Kafka并交由业务回调处理结果。"""
+    """异步数据解析服务,负责消费Kafka并交由业务回调处理结果。"""
 
     def __init__(
         self,
@@ -96,7 +96,7 @@ class AsyncDataAnalysisService(ServiceBase):
         """
         构建 topic 到处理器的映射
 
-        每个 topic 独立处理方法，直观明确，易于扩展
+        每个 topic 独立处理方法,直观明确,易于扩展
 
         Returns:
             dict: {topic: handler_function}
@@ -130,7 +130,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_station_param(value):
         """
         处理 SCHEDULE-STATION-PARAM
-        格式: [{'stationId': '...', ...}, ...]
+        输入格式: list[dict]: [{'stationId': '...', ...}, ...]
+        输出格式: list[tuple(str, dict)]: [(station_id, dict), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, list):
             return []
@@ -147,7 +152,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_station_realtime_data(value):
         """
         处理 SCHEDULE-STATION-REALTIME-DATA
-        格式: {'realTimeData': [{'stationId': '...', 'sendTime': '...', ...}, ...]}
+        输入格式: dict{str:list[dict]}: {'realTimeData': [{'stationId': '...', 'sendTime': '...', ...}, ...]}
+        输出格式: list[tuple(str, list[dict])]: [(station_id, [data1, data2, ...]), ...],按 stationId 分组并排序
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, [data1, data2, ...]), ...],按 stationId 分组并排序
         """
         if not isinstance(value, dict):
             return []
@@ -179,8 +189,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_environment_calendar(value):
         """
         处理 SCHEDULE-ENVIRONMENT-CALENDAR
-        格式: {'calendar': [...]}
-        全局数据，无 stationId
+        输入格式: {'calendar': [...]}
+        输出格式: list[tuple(str, dict)]: [("__global__", data)], 全局数据,无 stationId
+        Args:
+            value: JSON数据
+        Returns:
+            list: [("__global__", data)]
         """
         if not isinstance(value, dict):
             return []
@@ -189,8 +203,17 @@ class AsyncDataAnalysisService(ServiceBase):
     @staticmethod
     def _handle_environment_weather(value):
         """
-        处理 SCHEDULE-ENVIRONMENT-WEATHER，天气数据分厂站
-        格式: {"weather":[{"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str},...]}
+        处理 SCHEDULE-ENVIRONMENT-WEATHER,天气数据分厂站  
+        输入格式:  
+            - dict{str:list[dict]}: {"weather":[{"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str},...]}  
+        输出格式：  
+            - list[tuple(str, dict)]: [(station_id, {"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str}), ...]
+        Args:
+            value: JSON数据
+
+        Returns:
+            list: [(station_id, data), ...]
+     
         """
         if not isinstance(value, dict):
             return []
@@ -211,7 +234,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_meter(value):
         """
         处理 SCHEDULE-DEVICE-METER
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -225,7 +253,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_gun(value):
         """
         处理 SCHEDULE-DEVICE-GUN
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -239,7 +272,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_car_order(value):
         """
         处理 SCHEDULE-CAR-ORDER
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -253,7 +291,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_car_price(value):
         """
         处理 SCHEDULE-CAR-PRICE
-        格式: {'fee': [{'stationId': '...', 'sendTime': '...', ...}, ...]}
+        输入格式: dict{str: list[dict]}: {'fee': [{'stationId': '...', 'sendTime': '...', ...}, ...]}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -285,7 +328,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_error(value):
         """
         处理 SCHEDULE-DEVICE-ERROR
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -299,7 +347,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_host_dcdc(value):
         """
         处理 SCHEDULE-DEVICE-HOST-DCDC
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -313,7 +366,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_host_acdc(value):
         """
         处理 SCHEDULE-DEVICE-HOST-ACDC
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -327,7 +385,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_storage(value):
         """
         处理 SCHEDULE-DEVICE-STORAGE
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -341,7 +404,12 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_pv(value):
         """
         处理 SCHEDULE-DEVICE-PV
-        格式: {'stationId': '...', ...}
+        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
+        Args:
+            value: JSON数据
+        Returns:
+            list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -355,7 +423,8 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_model_output(value):
         """
         处理模型输出 topic (MODULE-OUTPUT-*)
-        格式: {'results': [{'station_id': '...', ...}, ...]}
+        输入格式: dict{str: list[dict]}: {'batchId':str,'results': [{'station_id': '...', ...}, ...]}
+        输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
             return []
@@ -380,11 +449,11 @@ class AsyncDataAnalysisService(ServiceBase):
 
     async def _process_message(self, msg, batch_id=None):
         """
-        处理单条消息，并触发数据就绪事件。
+        处理单条消息,并触发数据就绪事件。
 
         Args:
             msg: Kafka消息对象
-            batch_id: 批次ID（可选，由_main_loop传入）
+            batch_id: 批次ID（可选,由_main_loop传入）
 
         Returns:
             tuple: (是否成功, 场站ID列表)
@@ -399,7 +468,7 @@ class AsyncDataAnalysisService(ServiceBase):
             # 根据 topic 直接获取对应的处理器
             handler = self._topic_handlers.get(topic)
             if not handler:
-                logging.warning(f"未配置处理器的 topic: {topic}，尝试自动识别格式")
+                logging.warning(f"未配置处理器的 topic: {topic},尝试自动识别格式")
                 station_data_list = self._auto_detect_format(value)
             else:
                 # 直接调用对应的处理器
@@ -439,7 +508,7 @@ class AsyncDataAnalysisService(ServiceBase):
             if "results" in value:
                 return AsyncDataAnalysisService._handle_model_output(value)
 
-            # 可能是窗口格式，尝试常见的key
+            # 可能是窗口格式,尝试常见的key
             if "realTimeData" in value and isinstance(value["realTimeData"], list):
                 logging.info("自动识别为实时数据窗口格式")
                 return AsyncDataAnalysisService._handle_station_realtime_data(value)
@@ -489,7 +558,7 @@ class AsyncDataAnalysisService(ServiceBase):
                     if station_id == "__global__":
                         # 缓存全局数据（最新的）
                         self._global_data_cache[topic] = station_data
-                        logging.info(f"全局数据已缓存 topic={topic}，等待场站注册")
+                        logging.info(f"全局数据已缓存 topic={topic},等待场站注册")
                         continue
 
                     # 处理场站数据
@@ -503,11 +572,11 @@ class AsyncDataAnalysisService(ServiceBase):
 
                     # 创建场站任务（如果不存在）
                     if station_id not in self._station_tasks:
-                        # 1. 先应用全局缓存数据，再创建场站任务
+                        # 1. 先应用全局缓存数据,再创建场站任务
                         # 避免竞态条件：确保场站 worker 启动时已有完整的全局数据
                         if self._global_data_cache:
                             logging.info(
-                                f"新场站 {station_id} 注册，应用 {len(self._global_data_cache)} 个全局数据"
+                                f"新场站 {station_id} 注册,应用 {len(self._global_data_cache)} 个全局数据"
                             )
                             for (
                                 global_topic,
@@ -529,23 +598,23 @@ class AsyncDataAnalysisService(ServiceBase):
                     # 订单类 topic：只有进入新的一秒时才触发（上一秒订单已聚合完成）
                     # 其他 topic：每次更新都触发
                     if should_trigger and station_id in self._station_data_events:
-                        # 数据完整性检查：场站初始化后直接触发，初始化前需检查关键数据是否完整
+                        # 数据完整性检查：场站初始化后直接触发,初始化前需检查关键数据是否完整
                         if self._station_initialized.get(station_id, False):
-                            # 已初始化，直接触发
+                            # 已初始化,直接触发
                             self._station_data_events[station_id].set()
                         else:
-                            # 未初始化，检查是否有足够的数据
+                            # 未初始化,检查是否有足够的数据
                             if self._check_station_data_ready(station_id):
-                                # 关键数据已完整，标记为已初始化并触发
+                                # 关键数据已完整,标记为已初始化并触发
                                 self._station_initialized[station_id] = True
                                 self._station_data_events[station_id].set()
                                 logging.info(
-                                    f"场站 {station_id} 首次数据完整，开始处理"
+                                    f"场站 {station_id} 首次数据完整,开始处理"
                                 )
                             else:
-                                # 数据不完整，不触发（等待更多数据）
+                                # 数据不完整,不触发（等待更多数据）
                                 logging.debug(
-                                    f"场站 {station_id} 数据尚未完整，等待更多topic数据"
+                                    f"场站 {station_id} 数据尚未完整,等待更多topic数据"
                                 )
 
                 except Exception as exc:
@@ -574,24 +643,24 @@ class AsyncDataAnalysisService(ServiceBase):
         检查场站的关键数据是否完整（用于首次触发判断）
 
         策略：
-        1. 如果指定了 module_name，检查该模块需要的所有 topic 是否都有数据
-        2. 如果没有指定 module_name，检查是否至少有 50% 的 topic 有数据
+        1. 如果指定了 module_name,检查该模块需要的所有 topic 是否都有数据
+        2. 如果没有指定 module_name,检查是否至少有 50% 的 topic 有数据
         3. 可以根据业务需求调整阈值
 
         Args:
             station_id: 场站ID
 
         Returns:
-            bool: True 表示数据完整可以开始处理，False 表示还需等待
+            bool: True 表示数据完整可以开始处理,False 表示还需等待
         """
         if station_id not in self.dispatcher.data_cache:
             return False
 
         if self.module_name:
-            # 指定了模块，检查该模块需要的所有 topic
+            # 指定了模块,检查该模块需要的所有 topic
             required_topics = MODULE_TO_TOPICS.get(self.module_name, [])
             if not required_topics:
-                return True  # 没有依赖 topic，直接返回 True
+                return True  # 没有依赖 topic,直接返回 True
 
             # 检查每个必需的 topic 是否有数据
             available_count = 0
@@ -599,7 +668,7 @@ class AsyncDataAnalysisService(ServiceBase):
                 window = self.dispatcher.get_topic_window(station_id, topic)
                 if window:
                     available_count += 1
-                # 提前返回，避免不必要的计算
+                # 提前返回,避免不必要的计算
                 else:
                     break
 
@@ -613,7 +682,7 @@ class AsyncDataAnalysisService(ServiceBase):
 
             return data_ready
         else:
-            # 没有指定模块，使用宽松策略：至少 50% 的已订阅 topic 有数据
+            # 没有指定模块,使用宽松策略：至少 50% 的已订阅 topic 有数据
             station_topics = self.dispatcher.data_cache[station_id]
             total_topics = len(self.topics)
             available_count = sum(
@@ -626,7 +695,7 @@ class AsyncDataAnalysisService(ServiceBase):
 
     def _create_station_task(self, station_id):
         """
-        创建场站任务，如果已存在则跳过
+        创建场站任务,如果已存在则跳过
         Args:
             station_id: 场站ID
         Returns:
@@ -651,7 +720,7 @@ class AsyncDataAnalysisService(ServiceBase):
         self, station_id, callback, result_handler, stop_flag, data_event
     ):
         """
-        场站Worker - 事件驱动模式，当有新数据到达时立即处理，否则等待数据事件或超时触发。
+        场站Worker - 事件驱动模式,当有新数据到达时立即处理,否则等待数据事件或超时触发。
 
         超时机制：
         - 等待数据事件最多2秒
@@ -670,17 +739,17 @@ class AsyncDataAnalysisService(ServiceBase):
         while not stop_flag.is_set():
             try:
                 # 等待数据就绪事件（有新数据到达）或超时
-                # 超时设置为2秒：确保即使没有新订单，上一秒的订单也会被处理
+                # 超时设置为2秒：确保即使没有新订单,上一秒的订单也会被处理
                 data_arrived = False
                 try:
                     await asyncio.wait_for(data_event.wait(), timeout=2.0)
                     data_arrived = True
                 except asyncio.TimeoutError:
                     # 超时：可能有未处理的聚合数据（如订单）
-                    # 继续执行，让业务模块决定是否处理
+                    # 继续执行,让业务模块决定是否处理
                     pass
 
-                # 清除事件，准备下次触发
+                # 清除事件,准备下次触发
                 data_event.clear()
 
                 # 获取场站的批次ID
@@ -692,12 +761,12 @@ class AsyncDataAnalysisService(ServiceBase):
                         station_id, self.module_name
                     )
                 else:
-                    # 如果未指定模块名，则获取所有模块输入
+                    # 如果未指定模块名,则获取所有模块输入
                     module_input = self.dispatcher.get_all_inputs(station_id)
 
-                # 如果没有数据可用，跳过处理
+                # 如果没有数据可用,跳过处理
                 if not module_input:
-                    logging.debug(f"场站 {station_id} 没有可用数据，跳过处理")
+                    logging.debug(f"场站 {station_id} 没有可用数据,跳过处理")
                     continue
 
                 # 检查是否有可用的topic数据
@@ -708,7 +777,7 @@ class AsyncDataAnalysisService(ServiceBase):
                     logging.debug(f"场站 {station_id} 没有可用的topic数据")
                     continue
 
-                logging.info(f"场站 {station_id} 开始处理，batch_id={batch_id}")
+                logging.info(f"场站 {station_id} 开始处理,batch_id={batch_id}")
 
                 result = None
                 if callback:
@@ -718,7 +787,7 @@ class AsyncDataAnalysisService(ServiceBase):
                             callback, station_id, module_input
                         )
                         logging.info(
-                            f"场站 {station_id} 处理完成，result={'有' if result else '无'}"
+                            f"场站 {station_id} 处理完成,result={'有' if result else '无'}"
                         )
                     except Exception as exc:  # noqa: BLE001
                         handle_error(exc, context=f"回调处理 station_id={station_id}")
@@ -732,7 +801,7 @@ class AsyncDataAnalysisService(ServiceBase):
                         logging.info(f"场站 {station_id} 结果已提交到批次 {batch_id}")
                     else:
                         logging.warning(
-                            f"场站 {station_id} 找不到批次 {batch_id}，可用批次: {list(self.batch_aggregator._batches.keys())}"
+                            f"场站 {station_id} 找不到批次 {batch_id},可用批次: {list(self.batch_aggregator._batches.keys())}"
                         )
                 else:
                     if not batch_id:
@@ -755,7 +824,7 @@ class AsyncDataAnalysisService(ServiceBase):
                 await asyncio.sleep(1)  # 错误后短暂延迟
 
     async def _main_loop(self):
-        """主循环，负责消费Kafka消息并分发处理，管理批次，提交offset等"""
+        """主循环,负责消费Kafka消息并分发处理,管理批次,提交offset等"""
         try:
             await self.consumer.start()  # 启动消费者
         except Exception as exc:  # noqa: BLE001
@@ -763,7 +832,7 @@ class AsyncDataAnalysisService(ServiceBase):
             await asyncio.sleep(5)  # 连接失败后等待5秒再重试
             return
         try:
-            while not self._stop_event.is_set():  # 主循环，直到收到停止信号
+            while not self._stop_event.is_set():  # 主循环,直到收到停止信号
                 try:
                     batch = await self.consumer.getmany(timeout_ms=1000)  # 拉取一批消息
                 except Exception as exc:  # noqa: BLE001
@@ -774,7 +843,7 @@ class AsyncDataAnalysisService(ServiceBase):
                     continue
 
                 if not batch:
-                    # 即使没有消息，也检查是否需要定时提交
+                    # 即使没有消息,也检查是否需要定时提交
                     if self.offset_manager.should_commit():
                         await self.offset_manager.commit()
                     await asyncio.sleep(0.2)
@@ -796,7 +865,7 @@ class AsyncDataAnalysisService(ServiceBase):
                         handler = self._topic_handlers.get(msg.topic)
                         if not handler:
                             logging.warning(
-                                f"未配置处理器的 topic: {msg.topic}，尝试自动识别格式"
+                                f"未配置处理器的 topic: {msg.topic},尝试自动识别格式"
                             )
                             station_data_list = self._auto_detect_format(value)
                         else:
@@ -815,7 +884,7 @@ class AsyncDataAnalysisService(ServiceBase):
                             all_station_ids.extend(station_ids)
                     except Exception as exc:
                         logging.error(f"解析消息失败: {exc}")
-                        # 即使解析失败，也要保留消息以便后续错误处理
+                        # 即使解析失败,也要保留消息以便后续错误处理
                         parsed_messages.append((msg, None, None))
 
                 # 1. 先创建批次（如果有场站数据且配置了上传回调）
@@ -828,7 +897,7 @@ class AsyncDataAnalysisService(ServiceBase):
                         upload_callback=self._batch_upload_handler,
                     )
                     logging.info(
-                        f"创建批次 {batch_id}，包含 {len(unique_stations)} 个场站"
+                        f"创建批次 {batch_id},包含 {len(unique_stations)} 个场站"
                     )
 
                 # 2. 再处理所有消息（使用缓存的解析结果）
@@ -937,7 +1006,7 @@ class AsyncDataAnalysisService(ServiceBase):
 
 
 class DataAnalysisService(ServiceBase):
-    """同步数据解析服务，负责从Kafka消费数据并驱动业务回调。"""
+    """同步数据解析服务,负责从Kafka消费数据并驱动业务回调。"""
 
     def __init__(
         self,
@@ -1148,7 +1217,7 @@ class DataAnalysisService(ServiceBase):
         """
         场站工作线程（同步版本）
 
-        等待数据就绪事件，然后处理数据。
+        等待数据就绪事件,然后处理数据。
 
         超时机制：
         - 等待数据事件最多2秒
@@ -1158,10 +1227,10 @@ class DataAnalysisService(ServiceBase):
         while not stop_event.is_set():
             try:
                 # 等待数据就绪事件（最多等待2秒）
-                # 超时设置为2秒：确保即使没有新订单，上一秒的订单也会被处理
+                # 超时设置为2秒：确保即使没有新订单,上一秒的订单也会被处理
                 data_arrived = data_event.wait(timeout=2.0)
 
-                # 清除事件标志，为下一次数据准备
+                # 清除事件标志,为下一次数据准备
                 data_event.clear()
 
                 # 获取解析后的输入数据（只获取指定模块的输入）
@@ -1170,10 +1239,10 @@ class DataAnalysisService(ServiceBase):
                         station_id, self.module_name
                     )
                 else:
-                    # 如果未指定模块名，则获取所有模块输入
+                    # 如果未指定模块名,则获取所有模块输入
                     module_input = self.dispatcher.get_all_inputs(station_id)
 
-                # 如果没有数据可用，跳过处理
+                # 如果没有数据可用,跳过处理
                 if not module_input:
                     continue
 
@@ -1238,7 +1307,7 @@ class DataAnalysisService(ServiceBase):
                                     if station_id == "__global__":
                                         self._global_data_cache[topic] = station_data
                                         logging.info(
-                                            f"全局数据已缓存 topic={topic}，等待场站注册"
+                                            f"全局数据已缓存 topic={topic},等待场站注册"
                                         )
                                         continue
 
@@ -1250,11 +1319,11 @@ class DataAnalysisService(ServiceBase):
 
                                     # 创建或管理场站线程
                                     if station_id not in self._station_threads:
-                                        # ⚠️ 重要：先应用全局缓存数据，再创建场站线程
+                                        # ⚠️ 重要：先应用全局缓存数据,再创建场站线程
                                         # 避免竞态条件：确保场站 worker 启动时已有完整的全局数据
                                         if self._global_data_cache:
                                             logging.info(
-                                                f"新场站 {station_id} 注册，应用 {len(self._global_data_cache)} 个全局数据"
+                                                f"新场站 {station_id} 注册,应用 {len(self._global_data_cache)} 个全局数据"
                                             )
                                             for (
                                                 global_topic,
@@ -1335,7 +1404,7 @@ class DataAnalysisService(ServiceBase):
     def stop(self):
         self._stop_event.set()
 
-        # 触发所有场站的数据事件，让worker退出
+        # 触发所有场站的数据事件,让worker退出
         for data_event in self._station_data_events.values():
             data_event.set()
 

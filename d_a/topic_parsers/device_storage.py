@@ -19,7 +19,7 @@ class DeviceStorageParser(ConfigBasedParser):
         解析储能设备窗口数据（从聚合字典读取）
 
         Args:
-            window_data: [storage_dict]，其中 storage_dict = {
+            window_data: [storage_dict],其中 storage_dict = {
                 'storage_id_1': (raw_data1, timestamp1),
                 'storage_id_2': (raw_data2, timestamp2),
                 ...
@@ -51,15 +51,15 @@ class DeviceStorageParser(ConfigBasedParser):
 
     # def _align_storage_data(self, parsed_list):
     #     """
-    #     对齐储能ID数据，确保所有时间点使用相同的储能ID顺序
+    #     对齐储能ID数据,确保所有时间点使用相同的储能ID顺序
 
     #     Args:
-    #         parsed_list: 列表，每个元素为 {'sendTime': str, 'parsed': dict}
+    #         parsed_list: 列表,每个元素为 {'sendTime': str, 'parsed': dict}
 
     #     Returns:
-    #         对齐后的数据列表，每个元素为 {'sendTime': str, 'data': dict}
+    #         对齐后的数据列表,每个元素为 {'sendTime': str, 'data': dict}
     #     """
-    #     # 收集所有出现过的储能ID，保持首次出现的顺序
+    #     # 收集所有出现过的储能ID,保持首次出现的顺序
     #     all_storage_ids = []
     #     for item in parsed_list:
     #         if item['parsed'] and 'storageId' in item['parsed']:
@@ -82,7 +82,7 @@ class DeviceStorageParser(ConfigBasedParser):
     #         }
 
     #         if not item['parsed']:
-    #             # 解析失败，所有字段用0填充
+    #             # 解析失败,所有字段用0填充
     #             aligned_item['data']['storageId'] = all_storage_ids
     #             aligned_item['data']['storagePower'] = [0.0] * len(all_storage_ids)
     #             aligned_item['data']['storageCurrent'] = [0.0] * len(all_storage_ids)
@@ -109,7 +109,7 @@ class DeviceStorageParser(ConfigBasedParser):
     #                 continue
 
     #             if isinstance(value, list) and len(value) == len(current_storage_ids):
-    #                 # 这是与储能ID对应的列表数据，需要对齐
+    #                 # 这是与储能ID对应的列表数据,需要对齐
     #                 aligned_values = []
 
     #                 for sid in all_storage_ids:
@@ -118,7 +118,7 @@ class DeviceStorageParser(ConfigBasedParser):
     #                         idx = storage_index_map[sid]
     #                         aligned_values.append(value[idx])
     #                     else:
-    #                         # 当前时间点没有这个储能的数据，进行插值
+    #                         # 当前时间点没有这个储能的数据,进行插值
     #                         interpolated_value = self._interpolate_value(
     #                             parsed_list, i, sid, key, all_storage_ids
     #                         )
@@ -126,7 +126,7 @@ class DeviceStorageParser(ConfigBasedParser):
 
     #                 aligned_item['data'][key] = aligned_values
     #             else:
-    #                 # 非列表数据或长度不匹配，直接使用
+    #                 # 非列表数据或长度不匹配,直接使用
     #                 aligned_item['data'][key] = value
 
     #         aligned_data.append(aligned_item)

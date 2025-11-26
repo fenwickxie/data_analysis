@@ -29,7 +29,7 @@ def _ensure_logging() -> None:
     if _LOGGER_CONFIGURED:
         return
     handler_stream = logging.StreamHandler()
-    # 使用 RotatingFileHandler：单个文件 10MB，保留 5 个备份
+    # 使用 RotatingFileHandler：单个文件 10MB,保留 5 个备份
     handler_file = RotatingFileHandler(
         "data_analysis.log",
         maxBytes=10 * 1024 * 1024,  # 10MB

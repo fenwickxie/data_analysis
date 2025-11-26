@@ -13,7 +13,7 @@ class DeviceMeterParser(ConfigBasedParser):
         super().__init__(topic_name='SCHEDULE-DEVICE-METER')
 
 
-# 如果需要自定义解析逻辑，可以覆盖 parse 方法：
+# 如果需要自定义解析逻辑,可以覆盖 parse 方法：
 # 
 # class DeviceMeterParser(ConfigBasedParser):
 #     def __init__(self):

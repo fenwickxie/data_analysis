@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-Offset管理器，负责Kafka offset的跟踪和提交
+Offset管理器,负责Kafka offset的跟踪和提交
 """
 
 import logging
@@ -11,7 +11,7 @@ from aiokafka import TopicPartition, OffsetAndMetadata
 
 
 class OffsetManager:
-    """Offset管理器，用于异步服务的offset提交"""
+    """Offset管理器,用于异步服务的offset提交"""
     
     def __init__(self, consumer, config):
         """
@@ -19,7 +19,7 @@ class OffsetManager:
         
         Args:
             consumer: AsyncKafkaConsumerClient实例
-            config: offset配置字典，包含：
+            config: offset配置字典,包含：
                 - commit_interval_seconds: 提交间隔（秒）
                 - commit_batch_size: 批次大小
                 - max_commit_retries: 最大重试次数
@@ -86,17 +86,17 @@ class OffsetManager:
             success = await self._commit_with_retry(offsets_dict)
             
             if success:
-                # 提交成功，清空待处理offset和计数器
+                # 提交成功,清空待处理offset和计数器
                 committed_count = len(self._pending_offsets)
                 processed = self._processed_count
                 self._pending_offsets.clear()
                 self._processed_count = 0
                 self._last_commit_time = time.time()
-                logging.info(f"成功提交 {committed_count} 个分区的offset，共处理 {processed} 条消息")
+                logging.info(f"成功提交 {committed_count} 个分区的offset,共处理 {processed} 条消息")
                 return True
             else:
-                # 提交失败，保留待处理offset供下次重试
-                logging.warning(f"Offset提交失败，保留 {len(self._pending_offsets)} 个待处理offset")
+                # 提交失败,保留待处理offset供下次重试
+                logging.warning(f"Offset提交失败,保留 {len(self._pending_offsets)} 个待处理offset")
                 return False
         
         except Exception as exc:
@@ -124,13 +124,13 @@ class OffsetManager:
                     logging.debug(f"成功提交offset: {len(offsets_dict)} 个分区")
                     return True
                 else:
-                    logging.warning(f"提交offset失败，尝试 {attempt + 1}/{max_retries}")
+                    logging.warning(f"提交offset失败,尝试 {attempt + 1}/{max_retries}")
             except Exception as exc:
-                logging.error(f"提交offset异常，尝试 {attempt + 1}/{max_retries}: {exc}")
+                logging.error(f"提交offset异常,尝试 {attempt + 1}/{max_retries}: {exc}")
             
             if attempt < max_retries - 1:
                 import asyncio
                 await asyncio.sleep(retry_delay)
         
-        logging.error("达到最大重试次数，offset提交失败")
+        logging.error("达到最大重试次数,offset提交失败")
         return False

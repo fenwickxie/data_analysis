@@ -15,20 +15,20 @@ version: 1.0
 KAFKA_CONFIG = {
     'bootstrap_servers': ['10.8.4.40:35888'],
     'consumer': {
-        'group_id': 'stack-charge-tcp-command-xfy',  # ⚠️ 如果从单消费者模式切换到多消费者模式，建议修改为新的 group_id（如：xxx-v2）避免读取旧的过期 offset
-        'auto_offset_reset': 'latest', # 'earliest' 或 'latest'，默认从最新消息开始消费
+        'group_id': 'stack-charge-tcp-command-xfy',  # ⚠️ 如果从单消费者模式切换到多消费者模式,建议修改为新的 group_id（如：xxx-v2）避免读取旧的过期 offset
+        'auto_offset_reset': 'latest', # 'earliest' 或 'latest',默认从最新消息开始消费
         'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
         # 多消费者模式配置
-        'multi_consumer_mode': True,  # 启用多消费者模式：为每个topic创建独立消费者，解决消息积压时的topic饥饿问题
+        'multi_consumer_mode': True,  # 启用多消费者模式：为每个topic创建独立消费者,解决消息积压时的topic饥饿问题
         'max_poll_records': 10,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
-        'enable_auto_commit': False,  # 关闭自动提交，由服务统一管理
+        'enable_auto_commit': False,  # 关闭自动提交,由服务统一管理
         # 字节数限制
         "max_partition_fetch_bytes": 100 * 1024 * 1024,   # 单分区100MB
         "fetch_max_bytes": 500 * 1024 * 1024,            # 单次请求500MB
         "fetch_max_wait_ms": 500,                        # 最多等待500ms
         "fetch_min_bytes": 1,                            # 至少1字节就返回
-        # # 增加会话超时，避免 rebalance
+        # # 增加会话超时,避免 rebalance
         # "session_timeout_ms": 60000, 
         # "max_poll_interval_ms": 600000,
     },
@@ -62,7 +62,7 @@ TOPIC_DETAIL = {
     },
     'SCHEDULE-STATION-REALTIME-DATA': {
         'fields': ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg'],
-        'frequency': '1小时1次，推送7天',
+        'frequency': '1小时1次,推送7天',
         'modules': ['load_prediction', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
         'window_size': 24*7
     },
@@ -88,7 +88,7 @@ TOPIC_DETAIL = {
         'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
         'frequency': '1秒1次',
         'modules': ['operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
-        'window_size': 2  # 需要保留2秒数据：当前秒（聚合中）+ 上一秒（已完成，待处理）
+        'window_size': 2  # 需要保留2秒数据：当前秒（聚合中）+ 上一秒（已完成,待处理）
     },
     'SCHEDULE-CAR-PRICE': {
         'fields': ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee'],
@@ -104,13 +104,13 @@ TOPIC_DETAIL = {
     },
     'SCHEDULE-DEVICE-HOST-DCDC': {
         'fields': ['hostCode', 'dcWorkStatus', 'dcPower'],
-        'frequency': '充电时1秒1次，非充电15秒1次',
+        'frequency': '充电时1秒1次,非充电15秒1次',
         'modules': ['evaluation_model', 'thermal_management', 'operation_optimization'],
         'window_size': 1
     },
     'SCHEDULE-DEVICE-HOST-ACDC': {
         'fields': ['hostCode', 'acPower'],
-        'frequency': '充电时1秒1次，非充电15秒1次',
+        'frequency': '充电时1秒1次,非充电15秒1次',
         'modules': ['evaluation_model', 'thermal_management'],
         'window_size': 1
     },
@@ -157,7 +157,7 @@ MODULE_OUTPUT_TOPICS = {
     'customer_mining': f"{MODULE_OUTPUT_TOPIC_PREFIX}CUSTOMER_MINING",
 }
 
-# 默认缓存最近1条模型输出，供依赖窗口使用
+# 默认缓存最近1条模型输出,供依赖窗口使用
 MODULE_OUTPUT_WINDOW_SIZE = 1
 
 for module_name, output_topic in MODULE_OUTPUT_TOPICS.items():
@@ -181,6 +181,6 @@ for topic, v in TOPIC_DETAIL.items():
     for m in v['modules']:
         MODULE_TO_TOPICS.setdefault(m, []).append(topic)
 
-# 确保所有模块在映射中至少有空列表，便于后续查找
+# 确保所有模块在映射中至少有空列表,便于后续查找
 for module_name in MODULE_OUTPUT_TOPICS.keys():
     MODULE_TO_TOPICS.setdefault(module_name, [])

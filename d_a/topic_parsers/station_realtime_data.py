@@ -17,7 +17,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
     
     def parse(self, raw_data):
         """
-        解析实时数据，提取嵌套的 gunPower 字段
+        解析实时数据,提取嵌套的 gunPower 字段
         
         Args:
             raw_data: {
@@ -32,7 +32,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
             }
             
         Returns:
-            dict: 扁平化后的数据，包含 gunNo, outputPowerPerGunAvg, outputPowerPerGunMax 等
+            dict: 扁平化后的数据,包含 gunNo, outputPowerPerGunAvg, outputPowerPerGunMax 等
         """
         if not raw_data:
             return None
@@ -55,7 +55,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
     
     def parse_window(self, window_data):
         """
-        重写窗口解析方法，实现枪号对齐和时间窗口补全
+        重写窗口解析方法,实现枪号对齐和时间窗口补全
         
         功能：
         1. 按时间补全缺失的时间点（1小时间隔）
@@ -66,7 +66,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
             window_data: 窗口内的原始数据列表（可能不完整）
             
         Returns:
-            dict: 对齐后的数据，格式为：
+            dict: 对齐后的数据,格式为：
             {
                 'gunNo': ['01', '02', '05', ...],  # 统一的枪号顺序
                 'outputPowerPerGunAvg': [[2.73, 88.48, 34.29], [2.27, 44.17, 0], ...],
@@ -96,7 +96,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
         )
         
         if not has_gun_data:
-            # 没有枪号数据，使用默认的简单拼接
+            # 没有枪号数据,使用默认的简单拼接
             return super().parse_window(window_data)
         
         # 第四步：枪号对齐
@@ -124,7 +124,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
     
     def _fill_time_window(self, window_data):
         """
-        根据 sendTime 补全时间窗口，填充缺失的时间点
+        根据 sendTime 补全时间窗口,填充缺失的时间点
         
         规则：
         - 时间间隔：1小时
@@ -137,7 +137,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
             window_data: 原始窗口数据列表
             
         Returns:
-            list: 补全后的窗口数据列表（长度等于 window_size，按时间升序）
+            list: 补全后的窗口数据列表（长度等于 window_size,按时间升序）
         """
         if not window_data:
             return []
@@ -164,13 +164,13 @@ class StationRealtimeDataParser(ConfigBasedParser):
             # 解析结束时间
             end_time = datetime.strptime(end_time_str, '%Y-%m-%d %H:%M:%S')
         except ValueError:
-            # 时间格式不正确，返回原始数据
+            # 时间格式不正确,返回原始数据
             return window_data
         
         # 计算起始时间（往前推 window_size-1 小时）
         start_time = end_time - timedelta(hours=window_size - 1)
         
-        # 生成完整的时间序列（1小时间隔，从旧到新）
+        # 生成完整的时间序列（1小时间隔,从旧到新）
         complete_data = []
         for i in range(window_size):
             current_time = start_time + timedelta(hours=i)
@@ -180,26 +180,26 @@ class StationRealtimeDataParser(ConfigBasedParser):
             if current_time_str in time_data_map:
                 complete_data.append(time_data_map[current_time_str])
             else:
-                # 缺失数据，填充占位符（包含 sendTime，数据为空）
+                # 缺失数据,填充占位符（包含 sendTime,数据为空）
                 complete_data.append({
                     'sendTime': current_time_str,
                     'stationId': window_data[0].get('stationId', ''),  # 使用第一条数据的场站ID
-                    # 其他字段留空，后续填充0
+                    # 其他字段留空,后续填充0
                 })
         
         return complete_data
     
     def _align_gun_data(self, parsed_list):
         """
-        对齐枪号数据，确保所有时间点使用相同的枪号顺序
+        对齐枪号数据,确保所有时间点使用相同的枪号顺序
         
         Args:
-            parsed_list: 列表，每个元素为 {'sendTime': str, 'parsed': dict}
+            parsed_list: 列表,每个元素为 {'sendTime': str, 'parsed': dict}
         
         Returns:
-            对齐后的数据列表，每个元素为 {'sendTime': str, 'data': dict}
+            对齐后的数据列表,每个元素为 {'sendTime': str, 'data': dict}
         """
-        # 收集所有出现过的枪号，保持首次出现的顺序
+        # 收集所有出现过的枪号,保持首次出现的顺序
         all_gun_nos = []
         for item in parsed_list:
             if item['parsed'] and 'gunNo' in item['parsed']:
@@ -222,7 +222,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
             }
             
             if not item['parsed']:
-                # 解析失败，所有字段用0填充
+                # 解析失败,所有字段用0填充
                 aligned_item['data']['gunNo'] = all_gun_nos
                 aligned_item['data']['outputPowerPerGunAvg'] = [0.0] * len(all_gun_nos)
                 aligned_item['data']['outputPowerPerGunMax'] = [0.0] * len(all_gun_nos)
@@ -244,7 +244,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
                     continue
                 
                 if isinstance(value, list) and len(value) == len(current_gun_nos):
-                    # 这是与枪号对应的列表数据，需要对齐
+                    # 这是与枪号对应的列表数据,需要对齐
                     aligned_values = []
                     
                     for gun in all_gun_nos:
@@ -253,7 +253,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
                             idx = gun_index_map[gun]
                             aligned_values.append(value[idx])
                         else:
-                            # 当前时间点没有这个枪的数据，进行插值
+                            # 当前时间点没有这个枪的数据,进行插值
                             interpolated_value = self._interpolate_value(
                                 parsed_list, i, gun, key, all_gun_nos
                             )
@@ -261,7 +261,7 @@ class StationRealtimeDataParser(ConfigBasedParser):
                     
                     aligned_item['data'][key] = aligned_values
                 else:
-                    # 非列表数据或长度不匹配，直接使用
+                    # 非列表数据或长度不匹配,直接使用
                     aligned_item['data'][key] = value
             
             aligned_data.append(aligned_item)
@@ -273,9 +273,9 @@ class StationRealtimeDataParser(ConfigBasedParser):
         对缺失的枪号数据进行填充
         
         填充策略：
-        - 直接填充 0（简单清晰，避免插值引入误差）
+        - 直接填充 0（简单清晰,避免插值引入误差）
         
-        如需其他填充策略（如前向填充、线性插值等），可修改此方法。
+        如需其他填充策略（如前向填充、线性插值等）,可修改此方法。
         
         Args:
             parsed_list: 所有时间点的数据列表

@@ -15,7 +15,7 @@ class CarPriceParser(ConfigBasedParser):
 
     def parse(self, raw_data):
         """
-        解析价格数据，将 feeNo1-feeNo48 合并为 feeNo 列表
+        解析价格数据,将 feeNo1-feeNo48 合并为 feeNo 列表
 
         Args:
             raw_data: 单条价格数据或包含 fee 列表的字典
@@ -68,7 +68,7 @@ class CarPriceParser(ConfigBasedParser):
         if fee_numbers:
             parsed_data["feeNo"] = fee_numbers
 
-        # 复制其他字段，排除 feeNo1-feeNo48 及不在 self.fields 的字段
+        # 复制其他字段,排除 feeNo1-feeNo48 及不在 self.fields 的字段
         excluded_keys = {f"feeNo{i}" for i in range(1, 49)}
         for key, value in raw_data.items():
             if key not in excluded_keys and key in self.fields:
@@ -80,11 +80,11 @@ class CarPriceParser(ConfigBasedParser):
         """
         解析窗口数据
 
-        由于 SCHEDULE-CAR-PRICE 的 window_size=1，且一个消息包含完整的价格信息，
+        由于 SCHEDULE-CAR-PRICE 的 window_size=1,且一个消息包含完整的价格信息,
         所以直接解析最新的一条数据即可
 
         Args:
-            window_data: 窗口数据列表，只有一个元素，是多日的价格数据组成的列表。
+            window_data: 窗口数据列表,只有一个元素,是多日的价格数据组成的列表。
             [
                 [
                     {},
@@ -107,5 +107,5 @@ class CarPriceParser(ConfigBasedParser):
         if not window_data:
             return None
 
-        # 使用最新的价格数据（已经是单条数据，不是包含 'fee' 键的字典）
+        # 使用最新的价格数据（已经是单条数据,不是包含 'fee' 键的字典）
         return self.parse(window_data[-1][-1])  # 取最后一条数据

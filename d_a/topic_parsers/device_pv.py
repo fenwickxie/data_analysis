@@ -10,7 +10,7 @@ version: 1.0
 """
 """
 光伏数据解析器
-处理格式 {'pvPreDcPower': [...],'stationId':str} 的全局光伏数据
+处理格式 {'pvPreDcPower': [...],'stationId':str} 的光伏数据
 """
 from ..parser_base import ConfigBasedParser
 

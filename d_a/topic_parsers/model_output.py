@@ -15,14 +15,14 @@ from ..parser_base import ParserBase
 
 
 class ModelOutputParser(ParserBase):
-    """薄包装模型输出，用于将Kafka中其它模块的推理结果直接注入依赖模块。"""
+    """薄包装模型输出,用于将Kafka中其它模块的推理结果直接注入依赖模块。"""
 
     def __init__(self, module_name: Optional[str] = None):
         self.module_name = module_name or "unknown"
 
     def parse(self, raw_data):
         """
-        保持原始结构，必要时增加来源标记。
+        保持原始结构,必要时增加来源标记。
 
         """
         if raw_data is None:
@@ -31,6 +31,6 @@ class ModelOutputParser(ParserBase):
             return raw_data
     def parse_window(self, window_data):
         """
-        解析窗口数据，保持原始结构，必要时增加来源标记。
+        解析窗口数据,保持原始结构,必要时增加来源标记。
         """
         return self.parse(window_data[-1])

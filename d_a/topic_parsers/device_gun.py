@@ -14,13 +14,13 @@ class DeviceGunParser(ConfigBasedParser):
     
     def parse_window(self, window_data):
         """
-        重写窗口解析方法，实现枪号对齐
+        重写窗口解析方法,实现枪号对齐
         
         Args:
             window_data: 窗口内的原始数据列表
             
         Returns:
-            dict: 对齐后的数据，格式为：
+            dict: 对齐后的数据,格式为：
             {
                 'gunNo': ['01', '02', '05', ...],  # 统一的枪号顺序
                 'hostCode': [['host1', 'host2', ...], ...],  # 时序列表
@@ -48,7 +48,7 @@ class DeviceGunParser(ConfigBasedParser):
         )
         
         if not has_gun_data:
-            # 没有枪号数据，使用默认的简单拼接
+            # 没有枪号数据,使用默认的简单拼接
             return super().parse_window(window_data)
         
         # 第三步：枪号对齐
@@ -76,15 +76,15 @@ class DeviceGunParser(ConfigBasedParser):
     
     def _align_gun_data(self, parsed_list):
         """
-        对齐枪号数据，确保所有时间点使用相同的枪号顺序
+        对齐枪号数据,确保所有时间点使用相同的枪号顺序
         
         Args:
-            parsed_list: 列表，每个元素为 {'sendTime': str, 'parsed': dict}
+            parsed_list: 列表,每个元素为 {'sendTime': str, 'parsed': dict}
         
         Returns:
-            对齐后的数据列表，每个元素为 {'sendTime': str, 'data': dict}
+            对齐后的数据列表,每个元素为 {'sendTime': str, 'data': dict}
         """
-        # 收集所有出现过的枪号，保持首次出现的顺序
+        # 收集所有出现过的枪号,保持首次出现的顺序
         all_gun_nos = []
         for item in parsed_list:
             if item['parsed'] and 'gunNo' in item['parsed']:
@@ -107,7 +107,7 @@ class DeviceGunParser(ConfigBasedParser):
             }
             
             if not item['parsed']:
-                # 解析失败，所有字段用默认值填充
+                # 解析失败,所有字段用默认值填充
                 aligned_item['data']['gunNo'] = all_gun_nos
                 aligned_item['data']['hostCode'] = [''] * len(all_gun_nos)
                 aligned_item['data']['status'] = ['unknown'] * len(all_gun_nos)
@@ -129,7 +129,7 @@ class DeviceGunParser(ConfigBasedParser):
                     continue
                 
                 if isinstance(value, list) and len(value) == len(current_gun_nos):
-                    # 这是与枪号对应的列表数据，需要对齐
+                    # 这是与枪号对应的列表数据,需要对齐
                     aligned_values = []
                     
                     for gun in all_gun_nos:
@@ -138,7 +138,7 @@ class DeviceGunParser(ConfigBasedParser):
                             idx = gun_index_map[gun]
                             aligned_values.append(value[idx])
                         else:
-                            # 当前时间点没有这个枪的数据，进行插值
+                            # 当前时间点没有这个枪的数据,进行插值
                             interpolated_value = self._interpolate_value(
                                 parsed_list, i, gun, key, all_gun_nos
                             )
@@ -146,7 +146,7 @@ class DeviceGunParser(ConfigBasedParser):
                     
                     aligned_item['data'][key] = aligned_values
                 else:
-                    # 非列表数据或长度不匹配，直接使用
+                    # 非列表数据或长度不匹配,直接使用
                     aligned_item['data'][key] = value
             
             aligned_data.append(aligned_item)
@@ -159,7 +159,7 @@ class DeviceGunParser(ConfigBasedParser):
         
         策略：
         1. 优先使用前向填充或后向填充
-        2. 对于字符串类型字段，使用默认值
+        2. 对于字符串类型字段,使用默认值
         
         Args:
             parsed_list: 所有时间点的数据列表

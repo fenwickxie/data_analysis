@@ -50,7 +50,7 @@ class EnvironmentCalendarParser(ParserBase):
     
     def parse_window(self, window_data):
         """
-        日历数据通常不需要窗口处理，直接返回最新的数据
+        日历数据通常不需要窗口处理,直接返回最新的数据
         """
         if not window_data:
             return {}
