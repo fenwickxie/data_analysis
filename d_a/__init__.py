@@ -9,6 +9,12 @@ filename: __init__.py
 version: 1.0
 """
 
+__version__ = "2.0.0"
+__author__ = "xie.fangyu"
+__email__ = "xie.fangyu@byd.com"
+__url__ = "https://devops.byd.com/ETDCDISD/chargex-flagship-dispatch/data_analysis.git"
+__description__ = "Data Analysis Service"
+
 from .analysis_service import DataAnalysisService, AsyncDataAnalysisService
 from .errors import (
     DataAnalysisError,

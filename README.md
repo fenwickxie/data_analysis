@@ -27,7 +27,7 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 1. 克隆仓库：
    
    ```bash
-   git clone [仓库地址]
+   git clone https://github.com/fenwickxie/data_analysis.git
    cd data_analysis
    ```
 
@@ -52,19 +52,16 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 
 #### 方式二：作为 wheel 包使用（适合生产部署）
 
-1. 构建 wheel 包：
-   
-   ```bash
-   # 在 data_analysis 项目根目录
-   python -m build
-   ```
-
-2. 在你的模型项目中安装：
+1. 在你的模型项目中安装：
    
    ```bash
    pip install /path/to/data_analysis-2.0.0-py3-none-any.whl
    ```
-
+2. 下载并解压源码包：
+   ```bash
+   wget https://github.com/your_username/data_analysis/releases/download/v2.0.0/data_analysis-2.0.0.tar.gz
+   unzip /path/to/data_analysis-2.0.0.tar.gz
+   ```
 3. 创建模型项目：
    
    ```bash

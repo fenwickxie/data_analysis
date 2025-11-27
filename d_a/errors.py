@@ -20,20 +20,33 @@ def _ensure_logging() -> None:
     """
     Configure root logging once with stream + rotating file handlers.
     
-    日志轮转配置：
-    - 单个日志文件最大 10MB
-    - 保留最近 5 个备份文件
-    - 总日志空间约 50MB (10MB * 5)
+    日志配置从 config.yaml 读取：
+    - log_file: 日志文件路径
+    - max_bytes: 单个日志文件最大大小
+    - backup_count: 保留的备份文件数量
     """
     global _LOGGER_CONFIGURED
     if _LOGGER_CONFIGURED:
         return
+    
+    # 从配置加载日志设置
+    try:
+        from .config import LOGGING_CONFIG
+        log_file = LOGGING_CONFIG['log_file']
+        max_bytes = LOGGING_CONFIG['max_bytes']
+        backup_count = LOGGING_CONFIG['backup_count']
+    except (ImportError, KeyError):
+        # 配置加载失败时使用默认值
+        log_file = "data_analysis.log"
+        max_bytes = 10 * 1024 * 1024  # 10MB
+        backup_count = 5
+    
     handler_stream = logging.StreamHandler()
-    # 使用 RotatingFileHandler：单个文件 10MB,保留 5 个备份
+    # 使用 RotatingFileHandler
     handler_file = RotatingFileHandler(
-        "data_analysis.log",
-        maxBytes=10 * 1024 * 1024,  # 10MB
-        backupCount=5,              # 保留 5 个备份 (.log.1, .log.2, ...)
+        log_file,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
         encoding="utf-8"
     )
     logging.basicConfig(

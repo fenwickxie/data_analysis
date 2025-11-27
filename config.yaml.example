@@ -3,6 +3,11 @@
 #         station_guidance, evaluation_model, SOH_model, operation_optimization, customer_mining
 module_name: "load_prediction"
 
+# 日志配置
+logging:
+  log_file: "data_analysis.log"  # 日志文件路径（相对于项目根目录或绝对路径）
+  max_bytes: 10485760  # 单个日志文件最大大小（字节），默认10MB
+  backup_count: 5  # 保留的日志备份文件数量
 
 # Kafka配置
 kafka:

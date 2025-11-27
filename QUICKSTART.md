@@ -31,8 +31,12 @@ dist/
 ```bash
 pip install /path/to/data_analysis-2.0.0-py3-none-any.whl
 ```
-
-### 步骤 2: 创建项目文件
+### 步骤 2: 下载并解压源码包
+   ```bash
+   wget https://github.com/fenwickxie/data_analysis/releases/download/v2.0.0/data_analysis-2.0.0.tar.gz
+   unzip /path/to/data_analysis-2.0.0.tar.gz
+   ```
+### 步骤 3: 创建项目文件
 
 ```bash
 # 创建项目目录

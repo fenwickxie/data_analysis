@@ -23,16 +23,30 @@ setup(
     name="data_analysis",
     version="2.0.0",
     author="xie.fangyu",
-    author_email="fenwickxie@outlook.com",  # 请替换为实际邮箱
+    author_email="xie.fangyu@byd.com",  
     description="充电站数据分析解析模块 - 从Kafka获取数据，解析并分发给各业务模块",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/fenwickxie/data_analysis",  # 请替换为实际仓库地址
+    url="https://github.com/fenwickxie/data_analysis.git", 
     packages=find_packages(exclude=["tests", "tests.*", "docs", "scripts"]),
+    py_modules=[],  # 不包含顶层模块
+    package_data={
+        "d_a": [
+            "../README.md",
+            "../QUICKSTART.md", 
+            "../LICENSE",
+            "../requirements.txt",
+            "../config.yaml.example",
+            "../main.py.example",
+        ],
+    },
+    exclude_package_data={
+        "d_a": ["main.py"],  # 排除 main.py
+    },
     include_package_data=True,
     install_requires=requirements,
     python_requires=">=3.10",
-    license="MIT",  # 使用 license 参数代替 classifier
+    license="MIT", 
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -45,8 +59,8 @@ setup(
     ],
     keywords="kafka data-analysis charging-station data-processing",
     project_urls={
-        "Documentation": "https://github.com/fenwickxie/data_analysis/blob/main/README.md",
-        "Source": "https://github.com/fenwickxie/data_analysis",
+        "Documentation": "https://github.com/fenwickxie/data_analysis/blob/develop/README.md",
+        "Source": "https://github.com/fenwickxie/data_analysis.git",
         "Bug Reports": "https://github.com/fenwickxie/data_analysis/issues",
     },
     # 入口点（命令行工具，可选）

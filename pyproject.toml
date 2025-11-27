@@ -9,7 +9,7 @@ description = "充电站数据分析解析模块 - 从Kafka获取数据，解析
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "xie.fangyu", email = "your.email@example.com"}
+    {name = "fenwickxie", email = "fenwickxie@outlook.com"}
 ]
 requires-python = ">=3.10"
 classifiers = [
@@ -31,13 +31,25 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/fenwickxie/data_analysis"
-Documentation = "https://github.com/fenwickxie/data_analysis/blob/main/README.md"
-Repository = "https://github.com/fenwickxie/data_analysis"
+Homepage = "https://github.com/fenwickxie/data_analysis.git"
+Documentation = "https://github.com/fenwickxie/data_analysis/blob/develop/README.md"
+Repository = "https://github.com/fenwickxie/data_analysis.git"
 Issues = "https://github.com/fenwickxie/data_analysis/issues"
 
 [tool.setuptools]
 packages = ["d_a", "d_a.parsers", "d_a.topic_parsers"]
 
 [tool.setuptools.package-data]
-"*" = ["*.yaml", "*.yml"]
+d_a = [
+    "*.yaml",
+    "*.yml",
+    "../README.md",
+    "../QUICKSTART.md",
+    "../LICENSE",
+    "../requirements.txt",
+    "../config.yaml.example",
+    "../main.py.example",
+]
+
+[tool.setuptools.exclude-package-data]
+d_a = ["main.py"]

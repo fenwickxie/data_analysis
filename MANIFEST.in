@@ -1,4 +1,5 @@
-# 打包时包含的额外文件
+# 打包时包含的额外文件（用于源码分发 sdist）
+# 这些文件会通过 setup.py 的 package_data 配置安装到 wheel 中的 d_a 包目录
 include README.md
 include QUICKSTART.md
 include LICENSE
@@ -6,13 +7,15 @@ include requirements.txt
 include config.yaml.example
 include main.py.example
 
-
 # 排除测试和开发文件
 recursive-exclude tests *
 recursive-exclude scripts *
 recursive-exclude docs *
 exclude .gitignore
 exclude config.yaml
+
+# 排除 main.py（示例文件已提供为 main.py.example）
+exclude d_a/main.py
 
 # 排除编译文件和缓存
 global-exclude *.pyc

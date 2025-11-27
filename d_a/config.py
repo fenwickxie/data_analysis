@@ -100,3 +100,11 @@ MODULE_OUTPUT_TOPIC_PREFIX = _config['module_output']['topic_prefix']
 MODULE_OUTPUT_TOPICS = _config['module_output']['topics']
 MODULE_OUTPUT_WINDOW_SIZE = _config['module_output']['window_size']
 MODULE_NAME = _config.get('module_name', 'load_prediction')  # 默认为load_prediction
+
+# 日志配置
+_logging_config = _config.get('logging', {})
+LOGGING_CONFIG = {
+    'log_file': _logging_config.get('log_file', 'data_analysis.log'),
+    'max_bytes': _logging_config.get('max_bytes', 10 * 1024 * 1024),  # 默认10MB
+    'backup_count': _logging_config.get('backup_count', 5)  # 默认5个备份
+}
