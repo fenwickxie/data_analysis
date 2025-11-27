@@ -1,0 +1,145 @@
+# 当前运行的模块名称（用于确定订阅的topic和输出topic）
+# 可选值: load_prediction, electricity_price, pv_prediction, thermal_management,
+#         station_guidance, evaluation_model, SOH_model, operation_optimization, customer_mining
+module_name: "load_prediction"
+
+
+# Kafka配置
+kafka:
+  bootstrap_servers:
+    - '10.8.4.40:35888'
+  
+  consumer:
+    group_id: 'stack-charge-tcp-command-xfy'  # ⚠️ 如果从单消费者模式切换到多消费者模式,建议修改为新的 group_id（如：xxx-v2）避免读取旧的过期 offset
+    auto_offset_reset: 'latest'  # 'earliest' 或 'latest',默认从最新消息开始消费
+    key_deserializer: 'org.apache.kafka.common.serialization.StringDeserializer'
+    value_deserializer: 'org.apache.kafka.common.serialization.StringDeserializer'
+    # 多消费者模式配置
+    multi_consumer_mode: true  # 启用多消费者模式：为每个topic创建独立消费者,解决消息积压时的topic饥饿问题
+    max_poll_records: 10  # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
+    enable_auto_commit: false  # 关闭自动提交,由服务统一管理
+    # 字节数限制
+    max_partition_fetch_bytes: 104857600  # 单分区100MB (100 * 1024 * 1024)
+    fetch_max_bytes: 524288000  # 单次请求500MB (500 * 1024 * 1024)
+    fetch_max_wait_ms: 500  # 最多等待500ms
+    fetch_min_bytes: 1  # 至少1字节就返回
+  
+  listener:
+    ack-mode: 'manual'
+    type: 'batch'
+    missing-topics-fatal: false
+  
+  producer:
+    key_deserializer: 'org.apache.kafka.common.serialization.StringDeserializer'
+    value_deserializer: 'org.apache.kafka.common.serialization.StringDeserializer'
+
+# Offset管理配置
+offset_commit:
+  commit_interval_seconds: 5.0  # 定时提交间隔（秒）
+  commit_batch_size: 100  # 累积消息数提交阈值
+  max_commit_retries: 3  # 提交失败重试次数
+  commit_retry_delay: 1.0  # 重试延迟（秒）
+
+# Topic详细配置
+topic_detail:
+  SCHEDULE-STATION-PARAM:
+    fields: ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId', 'powerNum', 'normalClap', 'hostCode']
+    frequency: '新建站或配置更改时'
+    modules: ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model']
+    window_size: 1
+  
+  SCHEDULE-STATION-REALTIME-DATA:
+    fields: ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg']
+    frequency: '1小时1次,推送7天'
+    modules: ['load_prediction', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model']
+    window_size: 168  # 24*7
+  
+  SCHEDULE-ENVIRONMENT-CALENDAR:
+    fields: ['dayOfWeek', 'holiday']
+    frequency: '1年1次'
+    modules: ['load_prediction', 'electricity_price', 'SOH_model']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-METER:
+    fields: ['meterId', 'meterPower', 'rmeterLimitPower']
+    frequency: '5分钟1次'
+    modules: ['electricity_price']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-GUN:
+    fields: ['hostCode', 'gunNo', 'status']
+    frequency: '15秒1次'
+    modules: []
+    window_size: 1
+  
+  SCHEDULE-CAR-ORDER:
+    fields: ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity']
+    frequency: '1秒1次'
+    modules: ['operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model']
+    window_size: 2  # 需要保留2秒数据：当前秒（聚合中）+ 上一秒（已完成,待处理）
+  
+  SCHEDULE-CAR-PRICE:
+    fields: ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee']
+    frequency: '1月1次'
+    modules: ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-ERROR:
+    fields: ['stationId', 'hostError', 'acError', 'dcError', 'terminalError', 'storageError']
+    frequency: '触发推送'
+    modules: ['SOH_model']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-HOST-DCDC:
+    fields: ['hostCode', 'dcWorkStatus', 'dcPower']
+    frequency: '充电时1秒1次,非充电15秒1次'
+    modules: ['evaluation_model', 'thermal_management', 'operation_optimization']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-HOST-ACDC:
+    fields: ['hostCode', 'acPower']
+    frequency: '充电时1秒1次,非充电15秒1次'
+    modules: ['evaluation_model', 'thermal_management']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-STORAGE:
+    fields: ['hostId', 'storageId', 'storagePower', 'storageCurrent', 'storageTempMax', 'storageTempMin', 'storageSOC', 'storageSOH']
+    frequency: '15秒1次'
+    modules: ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization']
+    window_size: 1
+  
+  SCHEDULE-DEVICE-PV:
+    fields: ['stationId', 'pvId', 'pvPreDcPower']
+    frequency: '一天1次'
+    modules: ['pv_prediction']
+    window_size: 1
+  
+  SCHEDULE-ENVIRONMENT-WEATHER:
+    fields: ['stationId', 'weatherSituationYesterday', 'seasonTomorrow', 'weatherSituationTomorrow']
+    frequency: '一天1次'
+    modules: ['pv_prediction']
+    window_size: 1
+
+# 模块依赖关系
+module_dependencies:
+  electricity_price: ['pv_prediction', 'evaluation_model', 'SOH_model']
+  station_guidance: ['load_prediction', 'evaluation_model']
+  thermal_management: ['load_prediction', 'operation_optimization']
+  operation_optimization: ['pv_prediction']
+
+# 模块输出配置
+module_output:
+  topic_prefix: "MODULE-OUTPUT-"
+  window_size: 1  # 默认缓存最近1条模型输出,供依赖窗口使用
+  
+  # 各业务模块输出的Kafka topic映射
+  topics:
+    electricity_price: "MODULE-OUTPUT-ELECTRICITY_PRICE"
+    load_prediction: "MODULE-OUTPUT-LOAD_PREDICTION"
+    pv_prediction: "MODULE-OUTPUT-PV_PREDICTION"
+    thermal_management: "MODULE-OUTPUT-THERMAL_MANAGEMENT"
+    station_guidance: "MODULE-OUTPUT-STATION_GUIDANCE"
+    evaluation_model: "MODULE-OUTPUT-EVALUATION_MODEL"
+    SOH_model: "MODULE-OUTPUT-SOH_MODEL"
+    operation_optimization: "MODULE-OUTPUT-OPERATION_OPTIMIZATION"
+    customer_mining: "MODULE-OUTPUT-CUSTOMER_MINING"

@@ -1,0 +1,21 @@
+# 打包时包含的额外文件
+include README.md
+include QUICKSTART.md
+include LICENSE
+include requirements.txt
+include config.yaml.example
+include main.py.example
+
+
+# 排除测试和开发文件
+recursive-exclude tests *
+recursive-exclude scripts *
+recursive-exclude docs *
+exclude .gitignore
+exclude config.yaml
+
+# 排除编译文件和缓存
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude .DS_Store

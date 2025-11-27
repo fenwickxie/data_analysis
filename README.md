@@ -20,7 +20,9 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
 - Python 3.10+
 - Kafka集群（用于数据输入/输出）
 
-### 安装步骤
+### 两种使用方式
+
+#### 方式一：作为开发项目运行（适合开发和调试）
 
 1. 克隆仓库：
    
@@ -28,40 +30,71 @@ data_analysis是一个专为充电站数据分析设计的模块，旨在从Kafk
    git clone [仓库地址]
    cd data_analysis
    ```
+
 2. 安装依赖：
    
    ```bash
    pip install -r requirements.txt
    ```
-3. 配置Kafka连接（在`data_analysis/config.py`中修改`KAFKA_CONFIG`）：
-   
-   ```python
-   KAFKA_CONFIG = {
-       'bootstrap_servers': ['your_kafka_server:9092'],
-       'consumer': {
-           'group_id': 'your_group_id',
-           'auto_offset_reset': 'latest',
-           'enable_auto_commit': True,
-       },
-       'producer': {
-           # 生产者配置
-       }
-   }
-   ```
-   
-   **注意**：配置支持两种格式：
-   
-   - 嵌套格式（推荐）：consumer/producer 配置分别放在子字典中
-   - 扁平格式（兼容）：直接在顶层配置 group_id 等参数
-4. 运行示例：
+
+3. 配置并运行：
    
    ```bash
-   # 同步示例
-   python data_analysis/main.py
+   # 复制配置文件示例
+   cp config.yaml.example config.yaml
    
-   # 异步示例
-   python data_analysis/async_main.py
+   # 编辑配置文件（设置 module_name、Kafka 地址等）
+   # 使用你喜欢的编辑器编辑 config.yaml
+   
+   # 运行服务
+   python d_a/main.py
    ```
+
+#### 方式二：作为 wheel 包使用（适合生产部署）
+
+1. 构建 wheel 包：
+   
+   ```bash
+   # 在 data_analysis 项目根目录
+   python -m build
+   ```
+
+2. 在你的模型项目中安装：
+   
+   ```bash
+   pip install /path/to/data_analysis-2.0.0-py3-none-any.whl
+   ```
+
+3. 创建模型项目：
+   
+   ```bash
+   # 复制入口文件和配置文件到你的项目
+   cp /path/to/data_analysis/main.py.example your_project/main.py
+   cp /path/to/data_analysis/config.yaml.example your_project/config.yaml
+   
+   # 编辑 config.yaml，设置你的模块名称和 Kafka 配置
+   # 运行
+   python main.py
+   ```
+
+
+### 主要配置项
+
+在 `config.yaml` 中修改以下关键配置：
+
+```yaml
+# 1. 设置模块名称（重要！）
+module_name: "load_prediction"  # 改为你的模块名
+
+# 2. 配置 Kafka 连接
+kafka:
+  bootstrap_servers:
+    - 'your_kafka_server:9092'
+  consumer:
+    group_id: 'your_group_id'
+    auto_offset_reset: 'latest'
+```
+
 
 ## 目录结构
 
@@ -467,6 +500,17 @@ if __name__ == "__main__":
 - 日志、健康监控、配置热更新等功能同步/异步均支持。
 
 如需更多用法示例、测试用例，请参考 data_analysis/async_main.py、tests/test_async_service.py。
+
+## 相关文档
+
+为了帮助您更好地理解和使用本项目，我们提供了以下详细文档：
+
+- **[配置说明](docs/CONFIG.md)** - YAML配置文件详解、部署配置、环境变量设置
+- **[打包指南](docs/PACKAGING.md)** - 如何打包成wheel文件、在其他项目中使用
+- **[API文档](docs/API.md)** - 详细的API接口说明和使用示例
+- **[开发指南](docs/DEVELOPER.md)** - 开发环境搭建、代码规范、架构设计
+- **[部署文档](docs/DEPLOYMENT.md)** - Docker部署、Kubernetes部署、生产环境配置
+- **[测试文档](tests/README.md)** - 测试用例说明、测试策略、性能测试
 
 ## 贡献指南
 

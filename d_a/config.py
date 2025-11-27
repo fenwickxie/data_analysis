@@ -6,181 +6,97 @@ author: xie.fangyu
 date: 2025-10-16 11:09:43
 project: data_analysis
 filename: config.py
-version: 1.0
+version: 2.0
+description: 配置加载器 - 从YAML文件加载配置
 """
 
-# 配置文件：Kafka、topic、模块依赖
+import os
+import yaml
+from pathlib import Path
 
 
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['10.8.4.40:35888'],
-    'consumer': {
-        'group_id': 'stack-charge-tcp-command-xfy',  # ⚠️ 如果从单消费者模式切换到多消费者模式,建议修改为新的 group_id（如：xxx-v2）避免读取旧的过期 offset
-        'auto_offset_reset': 'latest', # 'earliest' 或 'latest',默认从最新消息开始消费
-        'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
-        'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
-        # 多消费者模式配置
-        'multi_consumer_mode': True,  # 启用多消费者模式：为每个topic创建独立消费者,解决消息积压时的topic饥饿问题
-        'max_poll_records': 10,      # 多消费者模式下：每个消费者的拉取上限；单消费者模式下：所有topic的总拉取上限
-        'enable_auto_commit': False,  # 关闭自动提交,由服务统一管理
-        # 字节数限制
-        "max_partition_fetch_bytes": 100 * 1024 * 1024,   # 单分区100MB
-        "fetch_max_bytes": 500 * 1024 * 1024,            # 单次请求500MB
-        "fetch_max_wait_ms": 500,                        # 最多等待500ms
-        "fetch_min_bytes": 1,                            # 至少1字节就返回
-        # # 增加会话超时,避免 rebalance
-        # "session_timeout_ms": 60000, 
-        # "max_poll_interval_ms": 600000,
-    },
-    'listener': {
-        'ack-mode': 'manual',
-        'type': 'batch',
-        'missing-topics-fatal': False,
-    },
-    'producer': {
-        'key_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
-        'value_deserializer': 'org.apache.kafka.common.serialization.StringDeserializer',
+def load_config(config_path=None):
+    """
+    从YAML文件加载配置
+    
+    Args:
+        config_path: 配置文件路径，默认为项目根目录下的config.yaml
+        
+    Returns:
+        dict: 配置字典
+    """
+    if config_path is None:
+        # 获取项目根目录（config.py的上级目录）
+        current_dir = Path(__file__).parent.parent
+        config_path = current_dir / 'config.yaml'
+    
+    if not os.path.exists(config_path):
+        raise FileNotFoundError(f"配置文件不存在: {config_path}")
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+    
+    return config
 
-    }
-}
 
-# Offset管理配置
-OFFSET_COMMIT_CONFIG = {
-    'commit_interval_seconds': 5.0,  # 定时提交间隔（秒）
-    'commit_batch_size': 100,        # 累积消息数提交阈值
-    'max_commit_retries': 3,         # 提交失败重试次数
-    'commit_retry_delay': 1.0,       # 重试延迟（秒）
-}
+def _build_module_output_topics(config):
+    """根据配置动态构建模块输出topic的完整配置"""
+    module_dependencies = config['module_dependencies']
+    module_output_topics = config['module_output']['topics']
+    module_output_window_size = config['module_output']['window_size']
+    topic_detail = config['topic_detail']
+    
+    # 为每个模块输出topic添加到topic_detail
+    for module_name, output_topic in module_output_topics.items():
+        consumers = [
+            consumer
+            for consumer, deps in module_dependencies.items()
+            if module_name in deps
+        ]
+        topic_detail[output_topic] = {
+            'fields': [],
+            'frequency': '模型输出',
+            'modules': consumers,
+            'window_size': module_output_window_size,
+        }
 
-# topic详细配置
-TOPIC_DETAIL = {
-    'SCHEDULE-STATION-PARAM': {
-        'fields': ['stationId', 'stationLng', 'stationLat', 'gunNum', 'gridCapacity', 'meterId','powerNum','normalClap', 'hostCode'],
-        'frequency': '新建站或配置更改时',
-        'modules': ['load_prediction', 'operation_optimization', 'electricity_price', 'SOH_model'],
-        'window_size': 1
-    },
-    'SCHEDULE-STATION-REALTIME-DATA': {
-        'fields': ['stationId', 'gunNo', 'outputPowerPerGunMax', 'outputPowerPerGunAvg', 'outputPowerPerStationMax', 'outputPowerPerStationAvg'],
-        'frequency': '1小时1次,推送7天',
-        'modules': ['load_prediction', 'electricity_price', 'SOH_model', 'thermal_management', 'evaluation_model'],
-        'window_size': 24*7
-    },
-    'SCHEDULE-ENVIRONMENT-CALENDAR': {
-        'fields': ['dayOfWeek', 'holiday'],
-        'frequency': '1年1次',
-        'modules': ['load_prediction', 'electricity_price', 'SOH_model'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-METER': {
-        'fields': ['meterId', 'meterPower', 'rmeterLimitPower'],
-        'frequency': '5分钟1次',
-        'modules': ['electricity_price'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-GUN': {
-        'fields': ['hostCode', 'gunNo', 'status'],
-        'frequency': '15秒1次',
-        'modules': [],
-        'window_size': 1
-    },
-    'SCHEDULE-CAR-ORDER': {
-        'fields': ['stationId', 'transactionSerialNo', 'hostCode', 'gunNo', 'terminalMaxOutElectric', 'startChargeTime', 'endChargeTime', 'beginSOC', 'soc', 'terminalRequireVoltage', 'terminalRequireElectric', 'outputPower', 'carProducerCode', 'batteryNominalTotalCapacity'],
-        'frequency': '1秒1次',
-        'modules': ['operation_optimization', 'station_guidance', 'electricity_price', 'evaluation_model'],
-        'window_size': 2  # 需要保留2秒数据：当前秒（聚合中）+ 上一秒（已完成,待处理）
-    },
-    'SCHEDULE-CAR-PRICE': {
-        'fields': ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee'],
-        'frequency': '1月1次',
-        'modules': ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-ERROR': {
-        'fields': ['stationId', 'hostError', 'acError', 'dcError', 'terminalError', 'storageError'],
-        'frequency': '触发推送',
-        'modules': ['SOH_model'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-HOST-DCDC': {
-        'fields': ['hostCode', 'dcWorkStatus', 'dcPower'],
-        'frequency': '充电时1秒1次,非充电15秒1次',
-        'modules': ['evaluation_model', 'thermal_management', 'operation_optimization'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-HOST-ACDC': {
-        'fields': ['hostCode', 'acPower'],
-        'frequency': '充电时1秒1次,非充电15秒1次',
-        'modules': ['evaluation_model', 'thermal_management'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-STORAGE': {
-        'fields': ['hostId', 'storageId', 'storagePower', 'storageCurrent', 'storageTempMax', 'storageTempMin', 'storageSOC', 'storageSOH'],
-        'frequency': '15秒1次',
-        'modules': ['evaluation_model', 'thermal_management', 'electricity_price', 'operation_optimization'],
-        'window_size': 1
-    },
-    'SCHEDULE-DEVICE-PV':{
-        'fields': ['stationId', 'pvId', 'pvPreDcPower'],
-        'frequency': '一天1次',
-        'modules': ['pv_prediction'],
-        'window_size': 1
-    },
-    'SCHEDULE-ENVIRONMENT-WEATHER': {
-        'fields':['stationId','weatherSituationYesterday','seasonTomorrow','weatherSituationTomorrow'],
-        'frequency': '一天1次',
-        'modules': ['pv_prediction'],
-        'window_size': 1
-    }
-}
 
-# 各模块间依赖关系
-MODULE_DEPENDENCIES = {
-    'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
-    'station_guidance': ['load_prediction', 'evaluation_model'],
-    'thermal_management': ['load_prediction', 'operation_optimization'],
-    'operation_optimization': ['pv_prediction'],
-    # 其他模块依赖可扩展
-}
+def _build_topic_mappings(config):
+    """构建topic和模块之间的映射关系"""
+    topic_detail = config['topic_detail']
+    module_output_topics = config['module_output']['topics']
+    
+    # topic到模块的多对多映射
+    topic_to_modules = {topic: v['modules'] for topic, v in topic_detail.items()}
+    
+    # 模块到topic的多对多映射
+    module_to_topics = {}
+    for topic, v in topic_detail.items():
+        for m in v['modules']:
+            module_to_topics.setdefault(m, []).append(topic)
+    
+    # 确保所有模块在映射中至少有空列表,便于后续查找
+    for module_name in module_output_topics.keys():
+        module_to_topics.setdefault(module_name, [])
+    
+    return topic_to_modules, module_to_topics
 
-# 各业务模块输出的Kafka topic映射（默认使用服务中的输出前缀）
-MODULE_OUTPUT_TOPIC_PREFIX = "MODULE-OUTPUT-"
-MODULE_OUTPUT_TOPICS = {
-    'electricity_price': f"{MODULE_OUTPUT_TOPIC_PREFIX}ELECTRICITY_PRICE",
-    'load_prediction': f"{MODULE_OUTPUT_TOPIC_PREFIX}LOAD_PREDICTION",
-    'pv_prediction': f"{MODULE_OUTPUT_TOPIC_PREFIX}PV_PREDICTION",
-    'thermal_management': f"{MODULE_OUTPUT_TOPIC_PREFIX}THERMAL_MANAGEMENT",
-    'station_guidance': f"{MODULE_OUTPUT_TOPIC_PREFIX}STATION_GUIDANCE",
-    'evaluation_model': f"{MODULE_OUTPUT_TOPIC_PREFIX}EVALUATION_MODEL",
-    'SOH_model': f"{MODULE_OUTPUT_TOPIC_PREFIX}SOH_MODEL",
-    'operation_optimization': f"{MODULE_OUTPUT_TOPIC_PREFIX}OPERATION_OPTIMIZATION",
-    'customer_mining': f"{MODULE_OUTPUT_TOPIC_PREFIX}CUSTOMER_MINING",
-}
 
-# 默认缓存最近1条模型输出,供依赖窗口使用
-MODULE_OUTPUT_WINDOW_SIZE = 1
+# 加载配置
+_config = load_config()
 
-for module_name, output_topic in MODULE_OUTPUT_TOPICS.items():
-    consumers = [
-        consumer
-        for consumer, deps in MODULE_DEPENDENCIES.items()
-        if module_name in deps
-    ]
-    TOPIC_DETAIL[output_topic] = {
-        'fields': [],
-        'frequency': '模型输出',
-        'modules': consumers,
-        'window_size': MODULE_OUTPUT_WINDOW_SIZE,
-    }
+# 构建模块输出topic配置
+_build_module_output_topics(_config)
 
-# topic到模块的多对多映射
-TOPIC_TO_MODULES = {topic: v['modules'] for topic, v in TOPIC_DETAIL.items()}
-# 模块到topic的多对多映射
-MODULE_TO_TOPICS = {}
-for topic, v in TOPIC_DETAIL.items():
-    for m in v['modules']:
-        MODULE_TO_TOPICS.setdefault(m, []).append(topic)
+# 构建映射关系
+TOPIC_TO_MODULES, MODULE_TO_TOPICS = _build_topic_mappings(_config)
 
-# 确保所有模块在映射中至少有空列表,便于后续查找
-for module_name in MODULE_OUTPUT_TOPICS.keys():
-    MODULE_TO_TOPICS.setdefault(module_name, [])
+# 导出配置变量（保持向后兼容）
+KAFKA_CONFIG = _config['kafka']
+OFFSET_COMMIT_CONFIG = _config['offset_commit']
+TOPIC_DETAIL = _config['topic_detail']
+MODULE_DEPENDENCIES = _config['module_dependencies']
+MODULE_OUTPUT_TOPIC_PREFIX = _config['module_output']['topic_prefix']
+MODULE_OUTPUT_TOPICS = _config['module_output']['topics']
+MODULE_OUTPUT_WINDOW_SIZE = _config['module_output']['window_size']
+MODULE_NAME = _config.get('module_name', 'load_prediction')  # 默认为load_prediction
