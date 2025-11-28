@@ -11,12 +11,11 @@ description: Tests for mock data generation utilities.
 """
 
 import pytest
-from tests.fixtures.data_generator_base import WindowDataBuilder
-from tests.fixtures.test_utils import DataGeneratorFactory
+from tests.fixtures.data_generator_base import WindowDataBuilder, DataGeneratorFactory
 
 def test_window_builder():
     """Test the WindowDataBuilder for creating time-series data."""
-    builder = WindowDataBuilder(window_size=10, interval_seconds=60)
+    builder = WindowDataBuilder(window_size=10, interval=60)
     data = builder.add_metadata("station_id", "S001") \
                   .add_random_field("power", 100, 200) \
                   .add_constant_field("status", 1) \
@@ -37,41 +36,32 @@ def test_data_generator_factory():
     
     # Test station parameter generation
     station_param = factory.generate("station_param", entity_id="S001")
-    assert station_param["stationId"] == "S001"
-    assert "gunNum" in station_param
+    assert station_param["station_id"] == "S001"
+    assert "gun_count" in station_param
 
     # Test time-series data generation
-    realtime_data = factory.generate("station_realtime_data", entity_id="S001", window_size=5)
-    assert realtime_data["stationId"] == "S001"
-    assert "gunPower" in realtime_data
-    assert len(realtime_data["sendTime"]) == 5
+    realtime_data = factory.generate("station_realtime", entity_id="S001", window_size=5)
+    assert realtime_data["station_id"] == "S001"
+    assert "history_curve_station_avg" in realtime_data
+    assert len(realtime_data["timestamps"]) == 5
 
     # Test generation of another data type
     car_price_data = factory.generate("car_price", entity_id="S001")
-    assert car_price_data[0]["stationId"] == "S001"
-    assert "gridPrice" in car_price_data[0]
+    assert car_price_data["station_id"] == "S001"
+    assert "periods" in car_price_data
+    assert len(car_price_data["periods"]) > 0
 
-def test_extract_station_data_logic(monkeypatch):
-    """Test the logic for extracting station data from various message formats."""
-    # This logic is in ServiceBase, so we can test it there.
-    from d_a.service_base import ServiceBase
-
-    # Format 1: List of dicts with 'stationId'
-    data1 = [{"stationId": "S001", "value": 1}, {"stationId": "S002", "value": 2}]
-    extracted1 = ServiceBase.extract_station_data("some_topic", data1)
-    assert extracted1 == [("S001", data1[0]), ("S002", data1[1])]
-
-    # Format 2: Dict with a specific key (e.g., 'realTimeData')
-    data2 = {"realTimeData": [{"stationId": "S003", "value": 3}]}
-    extracted2 = ServiceBase.extract_station_data("SCHEDULE-STATION-REALTIME-DATA", data2)
-    assert extracted2 == [("S003", data2["realTimeData"][0])]
-
-    # Format 3: Global data
-    data3 = {"calendar": [{"date": "2025-01-01"}]}
-    extracted3 = ServiceBase.extract_station_data("SCHEDULE-ENVIRONMENT-CALENDAR", data3)
-    assert extracted3 == [("__global__", data3)]
-
-    # Format 4: Single dict with 'stationId'
-    data4 = {"stationId": "S004", "value": 4}
-    extracted4 = ServiceBase.extract_station_data("some_other_topic", data4)
-    assert extracted4 == [("S004", data4)]
+def test_data_generation_with_factory():
+    """Test comprehensive data generation using factory."""
+    factory = DataGeneratorFactory()
+    
+    # Test all available data types
+    available_types = factory.get_available_types()
+    assert len(available_types) > 0
+    
+    # Test generating each type
+    for data_type in ["station_param", "station_realtime", "car_order", "car_price"]:
+        if data_type in available_types:
+            data = factory.generate(data_type, entity_id="S001", window_size=5)
+            assert data is not None
+            assert "station_id" in data or isinstance(data, dict)

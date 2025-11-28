@@ -142,7 +142,9 @@ graph TD
 ## 5. 测试执行与报告
 
 ### 5.1 测试执行
+
 测试使用 `pytest` 框架执行。开发者可以在本地通过以下命令运行测试：
+
 ```bash
 # 运行所有测试
 pytest tests/
@@ -152,16 +154,262 @@ pytest tests/test_dispatcher.py
 
 # 运行包含特定关键字的测试
 pytest -k "aggregation"
+
+# 使用测试运行器
+python tests/run_tests.py test --all
 ```
+
 `run_tests.py` 脚本提供了更友好的命令行接口，用于执行特定场景的测试，如连接性检查、快速测试等。
 
+#### 5.1.1 使用 run_tests.py
+
+**基本用法：**
+
+```bash
+# 检查 Kafka 连接性
+python tests/run_tests.py connectivity
+
+# 运行所有测试
+python tests/run_tests.py test --all
+
+# 运行特定模块测试
+python tests/run_tests.py test --module service
+python tests/run_tests.py test --module dispatcher
+```
+
+**生成测试报告：**
+
+```bash
+# 生成 HTML 和 XML 报告
+python tests/run_tests.py test --all --report
+
+# 生成代码覆盖率报告
+python tests/run_tests.py test --all --coverage
+
+# 生成所有报告（推荐）
+python tests/run_tests.py test --all --report --coverage
+```
+
 ### 5.2 测试报告
-测试报告将由 `pytest` 自动生成。在 CI/CD 环境中，可以配置生成 HTML 格式的详细报告，并与代码覆盖率报告集成。
+
+#### 5.2.1 报告类型
+
+测试报告系统支持以下格式：
+
+1. **HTML 测试报告** (`test_reports/test_report.html`)
+   - 美观的可视化界面
+   - 详细的测试结果展示
+   - 失败测试的堆栈跟踪
+   - 测试环境信息
+   - 适合人工查看和分析
+
+2. **JUnit XML 报告** (`test_reports/test_report.xml`)
+   - 标准化的 XML 格式
+   - 兼容各种 CI/CD 工具
+   - 适合自动化集成
+   - 可被 Jenkins、GitLab CI 等工具解析
+
+3. **代码覆盖率报告** (`test_reports/htmlcov/index.html`)
+   - 交互式的 HTML 覆盖率报告
+   - 显示每个模块的覆盖率百分比
+   - 高亮显示未覆盖的代码行
+   - 分支覆盖率统计
+   - 终端输出摘要信息
+
+#### 5.2.2 报告生成流程
+
+```mermaid
+graph LR
+    A[运行测试] --> B{报告选项};
+    B -->|--report| C[生成 HTML 报告];
+    B -->|--report| D[生成 XML 报告];
+    B -->|--coverage| E[生成覆盖率报告];
+    C --> F[test_reports/test_report.html];
+    D --> G[test_reports/test_report.xml];
+    E --> H[test_reports/htmlcov/];
+    F --> I[人工查看];
+    G --> J[CI/CD 集成];
+    H --> K[覆盖率分析];
+```
+
+#### 5.2.3 使用 pytest 直接生成报告
+
+```bash
+# 生成 HTML 报告
+pytest tests/ --html=test_report.html --self-contained-html -v
+
+# 生成 JUnit XML 报告
+pytest tests/ --junitxml=test_report.xml -v
+
+# 生成覆盖率报告
+pytest tests/ --cov=d_a --cov-report=html --cov-report=term -v
+
+# 组合使用（生成所有报告）
+pytest tests/ \
+  --html=test_report.html \
+  --self-contained-html \
+  --junitxml=test_report.xml \
+  --cov=d_a \
+  --cov-report=html \
+  --cov-report=term \
+  -v
+```
+
+#### 5.2.4 报告内容说明
+
+**HTML 测试报告包含：**
+- 测试执行摘要
+  - 总测试数
+  - 通过/失败/跳过数量
+  - 总耗时
+- 详细测试列表
+  - 每个测试的状态
+  - 执行时间
+  - 失败原因和堆栈跟踪
+- 测试环境信息
+  - Python 版本
+  - 平台信息
+  - 已安装的包
+
+**覆盖率报告显示：**
+- 整体覆盖率百分比
+- 模块级覆盖率统计
+- 文件级详细信息
+  - 每行代码的执行次数
+  - 未执行的代码高亮
+  - 分支覆盖情况
 
 ### 5.3 代码覆盖率
-我们使用 `pytest-cov` 工具来衡量测试的代码覆盖率。目标是核心逻辑模块的覆盖率达到 90% 以上。
+
+#### 5.3.1 覆盖率目标
+
+我们使用 `pytest-cov` 工具来衡量测试的代码覆盖率。各模块的覆盖率目标如下：
+
+| 模块 | 目标覆盖率 | 当前状态 | 优先级 |
+|------|-----------|---------|--------|
+| dispatcher.py | ≥ 90% | ✅ | 高 |
+| analysis_service.py | ≥ 90% | ✅ | 高 |
+| service_base.py | ≥ 85% | ✅ | 高 |
+| parsers/* | ≥ 85% | ✅ | 中 |
+| topic_parsers/* | ≥ 85% | ✅ | 中 |
+| kafka_client.py | ≥ 80% | ⚠️ | 中 |
+| batch_result_aggregator.py | ≥ 85% | ✅ | 高 |
+| offset_manager.py | ≥ 80% | ⚠️ | 中 |
+| config.py | ≥ 95% | ✅ | 高 |
+| errors.py | ≥ 90% | ✅ | 中 |
+
+#### 5.3.2 覆盖率分析
+
 ```bash
-pytest --cov=d_a tests/
+# 运行覆盖率测试
+pytest tests/ --cov=d_a --cov-report=term
+
+# 查看详细覆盖率
+pytest tests/ --cov=d_a --cov-report=html
+# 然后打开 htmlcov/index.html
+
+# 只查看未覆盖的行
+pytest tests/ --cov=d_a --cov-report=term-missing
+```
+
+#### 5.3.3 持续集成配置
+
+在 CI/CD 环境中，测试报告应自动生成并归档：
+
+**GitHub Actions 示例：**
+
+```yaml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install -r requirements-dev.txt
+    
+    - name: Run tests with reports
+      run: |
+        python tests/run_tests.py test --all --report --coverage
+    
+    - name: Upload test reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-reports
+        path: test_reports/
+    
+    - name: Publish test results
+      uses: EnricoMi/publish-unit-test-result-action@v2
+      if: always()
+      with:
+        files: test_reports/test_report.xml
+```
+
+**GitLab CI 示例：**
+
+```yaml
+test:
+  stage: test
+  script:
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+    - python tests/run_tests.py test --all --report --coverage
+  artifacts:
+    when: always
+    paths:
+      - test_reports/
+    reports:
+      junit: test_reports/test_report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: test_reports/coverage.xml
+```
+
+#### 5.3.4 报告查看和分析
+
+**HTML 报告查看：**
+
+```bash
+# Windows
+start test_reports/test_report.html
+
+# Linux/Mac
+open test_reports/test_report.html
+# 或
+xdg-open test_reports/test_report.html
+```
+
+**覆盖率报告查看：**
+
+```bash
+# Windows
+start test_reports/htmlcov/index.html
+
+# Linux/Mac
+open test_reports/htmlcov/index.html
+```
+
+**命令行快速查看：**
+
+```bash
+# 查看覆盖率摘要
+python tests/run_tests.py test --all --coverage | grep "TOTAL"
+
+# 查看测试结果摘要
+python tests/run_tests.py test --all --report | grep -E "(passed|failed)"
 ```
 
 ## 6. 缺陷管理

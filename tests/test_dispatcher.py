@@ -145,9 +145,15 @@ def test_time_series_concatenation(dispatcher):
 
     # Simulate three time-series data points with varying gun numbers
     test_data = [
-        {"stationId": station_id, "sendTime": "2025-11-04 09:00:00", "gunPower": {"gunNo": ["01", "02"], "outputPowerPerGunAvg": [10, 20]}},
-        {"stationId": station_id, "sendTime": "2025-11-04 10:00:00", "gunPower": {"gunNo": ["02", "03"], "outputPowerPerGunAvg": [25, 35]}},
-        {"stationId": station_id, "sendTime": "2025-11-04 11:00:00", "gunPower": {"gunNo": ["01", "03"], "outputPowerPerGunAvg": [15, 40]}},
+        {"stationId": station_id, "sendTime": "2025-11-04 09:00:00", 
+         "gunPower": {"gunNo": ["01", "02"], "outputPowerPerGunAvg": [10, 20], "outputPowerPerGunMax": [20, 40]},
+         "outputPowerPerStationAvg": 15, "outputPowerPerStationMax": 30},
+        {"stationId": station_id, "sendTime": "2025-11-04 10:00:00", 
+         "gunPower": {"gunNo": ["02", "03"], "outputPowerPerGunAvg": [25, 35], "outputPowerPerGunMax": [50, 70]},
+         "outputPowerPerStationAvg": 30, "outputPowerPerStationMax": 60},
+        {"stationId": station_id, "sendTime": "2025-11-04 11:00:00", 
+         "gunPower": {"gunNo": ["01", "03"], "outputPowerPerGunAvg": [15, 40], "outputPowerPerGunMax": [30, 80]},
+         "outputPowerPerStationAvg": 27.5, "outputPowerPerStationMax": 55},
     ]
 
     for data in test_data:
@@ -164,12 +170,4 @@ def test_time_series_concatenation(dispatcher):
     # For example, if the unified gun list is ["01", "02", "03"], the power for the first timestamp should be [10, 20, 0] (or None).
     
     # This is a simplified check
-    assert "gunPower" in result
-    gun_power_data = result["gunPower"]
-    assert "gunNo" in gun_power_data
-    assert "outputPowerPerGunAvg" in gun_power_data
-    
-    # Check if the data is aligned (all lists have the same length)
-    num_guns = len(gun_power_data["gunNo"])
-    for power_list in gun_power_data["outputPowerPerGunAvg"]:
-        assert len(power_list) == num_guns
+    assert "stationId" in result

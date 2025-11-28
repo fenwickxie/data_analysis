@@ -15,6 +15,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
+from datetime import datetime
 
 
 @dataclass
@@ -273,7 +274,6 @@ class EnvironmentCalendarStrategy(DataGenerationStrategy):
     """环境日历生成策略"""
     
     def generate(self, entity_id: str = "global", window_size: int = 1, **kwargs) -> Dict[str, Any]:
-        from datetime import datetime
         return {
             "workday_code": random.choice([0, 1]),
             "holiday_code": random.choice([0, 1, 2]),

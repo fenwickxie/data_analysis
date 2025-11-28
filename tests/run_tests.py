@@ -7,7 +7,7 @@ date: 2025-11-24
 project: data_analysis
 filename: run_tests.py
 version: 2.0
-description: 重构后的测试运行脚本
+description: 测试运行脚本
 """
 
 import sys
@@ -21,6 +21,10 @@ if str(project_root) not in sys.path:
 import asyncio
 import argparse
 import logging
+
+import pytest
+from d_a.config import KAFKA_CONFIG, TOPIC_TO_MODULES
+from d_a.kafka_client import AsyncKafkaConsumerClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,141 +40,158 @@ class TestRunner:
     
     async def run_connectivity_test(self):
         """运行连接性测试"""
-        from tests.test_kafka_consume import run_kafka_connectivity
-        
         print("运行Kafka连接性测试...")
-        result = await run_kafka_connectivity()
-        
-        if result:
-            print("\n✓ Kafka连接成功！")
-            return 0
-        else:
-            print("\n✗ Kafka连接失败！")
-            return 1
-    
-    async def run_quick_test(self):
-        """运行快速测试"""
-        from tests.test_kafka_consume import quick_test
-        
-        print(f"运行快速测试（超时{self.args.timeout}秒）...")
-        await quick_test(timeout=self.args.timeout)
-        return 0
-    
-    async def run_consume_test(self):
-        """运行完整消费测试"""
-        from tests.test_kafka_consume import main as consume_main
-        
-        print("运行Kafka消费完整测试...")
-        await consume_main(
-            timeout_per_topic=self.args.timeout,
-            module_name=self.args.module,
+        consumer = AsyncKafkaConsumerClient(
+            list(TOPIC_TO_MODULES.keys()),
+            KAFKA_CONFIG,
+            []
         )
-        return 0
-    
-    async def run_module_test(self):
-        """运行模块测试"""
-        from tests.test_kafka_consume import run_module_topics
-        
-        print(f"测试模块: {self.args.module}")
-        await run_module_topics(
-            self.args.module,
-            timeout_per_topic=self.args.timeout,
-        )
-        return 0
-    
-    async def run_produce_test(self):
-        """运行生产者测试"""
-        from tests.test_mock_producer import MockProducer
-        
-        print(f"运行模拟生产者（{self.args.duration}秒）...")
-        
-        producer = MockProducer()
         try:
-            await producer.start()
-            await producer.run_continuous(
-                duration_seconds=self.args.duration,
-                interval_seconds=self.args.interval
-            )
-        except KeyboardInterrupt:
-            print("\n用户中断")
+            await consumer.start()
+            topics = consumer.topics
+            print(f"\n✓ Kafka连接成功！发现 {len(topics)} 个 topics。")
+            return 0
         except Exception as e:
-            print(f"\n错误: {e}")
+            print(f"\n✗ Kafka连接失败: {e}")
             return 1
         finally:
-            await producer.stop()
+            if consumer.consumer:
+                await consumer.stop()
+
+    def run_pytest(self):
+        """使用 Pytest 运行测试"""
+        pytest_args = []
+        if self.args.module:
+            # 查找匹配模块名的测试文件
+            module_path = project_root / "tests" / f"test_{self.args.module}.py"
+            if module_path.exists():
+                pytest_args.append(str(module_path))
+            else:
+                print(f"错误: 找不到模块 '{self.args.module}' 对应的测试文件 '{module_path}'")
+                return 1
+        elif self.args.all:
+            pytest_args.append(str(project_root / "tests"))
         
-        return 0
-    
-    async def run(self):
-        """执行测试"""
-        test_map = {
-            'connectivity': self.run_connectivity_test,
-            'quick': self.run_quick_test,
-            'consume': self.run_consume_test,
-            'module': self.run_module_test,
-            'produce': self.run_produce_test,
-        }
-        
-        handler = test_map.get(self.args.test_type)
-        if not handler:
-            print(f"未知的测试类型: {self.args.test_type}")
+        if not pytest_args:
+            print("错误: 没有指定要运行的测试。请使用 --all 或 --module。")
             return 1
         
-        return await handler()
+        # 添加报告生成参数
+        if self.args.report:
+            report_dir = project_root / "test_reports"
+            report_dir.mkdir(exist_ok=True)
+            
+            # HTML报告
+            html_report = report_dir / "test_report.html"
+            pytest_args.extend([
+                f"--html={html_report}",
+                "--self-contained-html"
+            ])
+            
+            # JUnit XML报告
+            xml_report = report_dir / "test_report.xml"
+            pytest_args.append(f"--junitxml={xml_report}")
+            
+            print(f"测试报告将生成到: {report_dir}")
+        
+        # 添加覆盖率报告参数
+        if self.args.coverage:
+            report_dir = project_root / "test_reports"
+            report_dir.mkdir(exist_ok=True)
+            cov_html_dir = report_dir / "htmlcov"
+            
+            pytest_args.extend([
+                "--cov=d_a",
+                f"--cov-report=html:{cov_html_dir}",
+                "--cov-report=term"
+            ])
+            
+            print(f"覆盖率报告将生成到: {cov_html_dir}")
+            
+        print(f"运行 pytest 命令: pytest {' '.join(pytest_args)}")
+        result = pytest.main(pytest_args)
+        
+        # 打印报告位置
+        if self.args.report or self.args.coverage:
+            print("\n" + "="*80)
+            print("测试报告已生成:")
+            if self.args.report:
+                print(f"  • HTML报告: {report_dir / 'test_report.html'}")
+                print(f"  • XML报告:  {report_dir / 'test_report.xml'}")
+            if self.args.coverage:
+                print(f"  • 覆盖率报告: {report_dir / 'htmlcov' / 'index.html'}")
+            print("="*80)
+        
+        return result
+
+    async def run(self):
+        """执行测试"""
+        if self.args.test_type == 'connectivity':
+            return await self.run_connectivity_test()
+        elif self.args.test_type == 'test':
+            # pytest不需要在async中运行,直接返回
+            return self.run_pytest()
+        else:
+            print(f"未知的测试类型: {self.args.test_type}")
+            return 1
 
 
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(
-        description='Kafka测试工具集',
+        description='Data Analysis 测试工具',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python run_tests.py connectivity                        # 测试连接
-  python run_tests.py quick --timeout 15                  # 快速测试
-  python run_tests.py consume                             # 完整测试
-  python run_tests.py module --module load_prediction     # 模块测试
-  python run_tests.py produce --duration 300 --interval 10 # 生产数据
+  python tests/run_tests.py connectivity                    # 测试Kafka连接
+  python tests/run_tests.py test --all                      # 运行所有测试
+  python tests/run_tests.py test --all --report             # 运行测试并生成HTML+XML报告
+  python tests/run_tests.py test --all --coverage           # 运行测试并生成覆盖率报告
+  python tests/run_tests.py test --all --report --coverage  # 生成所有报告
+  python tests/run_tests.py test --module service           # 运行service模块的测试
         """
     )
     
     parser.add_argument(
         'test_type',
-        choices=['connectivity', 'quick', 'consume', 'module', 'produce'],
-        help='测试类型'
+        choices=['connectivity', 'test'],
+        help='要执行的操作类型'
+    )
+    
+    parser.add_argument(
+        '--all',
+        action='store_true',
+        help='运行所有测试 (用于 "test" 类型)'
     )
     
     parser.add_argument(
         '--module',
-        default='load_prediction',
-        help='指定测试的模块名（用于module测试，默认: load_prediction）'
+        help='指定要测试的模块名 (例如: service, dispatcher)'
     )
     
     parser.add_argument(
-        '--duration',
-        type=int,
-        default=60,
-        help='运行时长（秒，用于produce测试，默认: 60）'
+        '--report',
+        action='store_true',
+        help='生成测试报告 (HTML和JUnit XML格式)'
     )
     
     parser.add_argument(
-        '--timeout',
-        type=int,
-        default=20,
-        help='每个topic的超时时间（秒，用于consume测试，默认: 20）'
-    )
-    
-    parser.add_argument(
-        '--interval',
-        type=int,
-        default=10,
-        help='发送间隔（秒，用于produce测试，默认: 10）'
+        '--coverage',
+        action='store_true',
+        help='生成代码覆盖率报告'
     )
     
     args = parser.parse_args()
     
+    if args.test_type == 'test' and not args.all and not args.module:
+        parser.error("--all 或 --module 参数在 'test' 类型下必须至少指定一个。")
+
     runner = TestRunner(args)
-    exit_code = asyncio.run(runner.run())
+    # 如果是connectivity测试,使用asyncio.run; 如果是pytest,直接运行
+    if args.test_type == 'connectivity':
+        exit_code = asyncio.run(runner.run())
+    else:
+        exit_code = runner.run_pytest()
     sys.exit(exit_code)
 
 
