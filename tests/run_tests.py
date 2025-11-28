@@ -36,10 +36,10 @@ class TestRunner:
     
     async def run_connectivity_test(self):
         """运行连接性测试"""
-        from tests.test_kafka_consume_v2 import test_kafka_connectivity
+        from tests.test_kafka_consume import run_kafka_connectivity
         
         print("运行Kafka连接性测试...")
-        result = await test_kafka_connectivity()
+        result = await run_kafka_connectivity()
         
         if result:
             print("\n✓ Kafka连接成功！")
@@ -50,7 +50,7 @@ class TestRunner:
     
     async def run_quick_test(self):
         """运行快速测试"""
-        from tests.test_kafka_consume_v2 import quick_test
+        from tests.test_kafka_consume import quick_test
         
         print(f"运行快速测试（超时{self.args.timeout}秒）...")
         await quick_test(timeout=self.args.timeout)
@@ -58,23 +58,29 @@ class TestRunner:
     
     async def run_consume_test(self):
         """运行完整消费测试"""
-        from tests.test_kafka_consume_v2 import main as consume_main
+        from tests.test_kafka_consume import main as consume_main
         
         print("运行Kafka消费完整测试...")
-        await consume_main()
+        await consume_main(
+            timeout_per_topic=self.args.timeout,
+            module_name=self.args.module,
+        )
         return 0
     
     async def run_module_test(self):
         """运行模块测试"""
-        from tests.test_kafka_consume_v2 import test_module_topics
+        from tests.test_kafka_consume import run_module_topics
         
         print(f"测试模块: {self.args.module}")
-        await test_module_topics(self.args.module)
+        await run_module_topics(
+            self.args.module,
+            timeout_per_topic=self.args.timeout,
+        )
         return 0
     
     async def run_produce_test(self):
         """运行生产者测试"""
-        from tests.test_mock_producer_v2 import MockProducer
+        from tests.test_mock_producer import MockProducer
         
         print(f"运行模拟生产者（{self.args.duration}秒）...")
         
