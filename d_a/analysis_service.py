@@ -203,17 +203,17 @@ class AsyncDataAnalysisService(ServiceBase):
     @staticmethod
     def _handle_environment_weather(value):
         """
-        处理 SCHEDULE-ENVIRONMENT-WEATHER,天气数据分厂站  
-        输入格式:  
-            - dict{str:list[dict]}: {"weather":[{"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str},...]}  
-        输出格式：  
+        处理 SCHEDULE-ENVIRONMENT-WEATHER,天气数据分厂站
+        输入格式:
+            - dict{str:list[dict]}: {"weather":[{"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str},...]}
+        输出格式：
             - list[tuple(str, dict)]: [(station_id, {"stationId":str,"weatherSituationTomorrow":str,"weatherSituationYesterday":str,"seasonTomorrow":str}), ...]
         Args:
             value: JSON数据
 
         Returns:
             list: [(station_id, data), ...]
-     
+
         """
         if not isinstance(value, dict):
             return []
@@ -423,7 +423,7 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_model_output(value):
         """
         处理模型输出 topic (MODULE-OUTPUT-*)
-        输入格式: dict{str: list[dict]}: {'batchId':str,'results': [{'station_id': '...', ...}, ...]}
+        输入格式: dict{str:Any}: {'batch_id': str, 'module': str, 'results': [dict{'station_id':str,Any,Any}, dict{}, ...], 'stations_count': int, 'timestamp': float}
         输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
@@ -608,9 +608,7 @@ class AsyncDataAnalysisService(ServiceBase):
                                 # 关键数据已完整,标记为已初始化并触发
                                 self._station_initialized[station_id] = True
                                 self._station_data_events[station_id].set()
-                                logging.info(
-                                    f"场站 {station_id} 首次数据完整,开始处理"
-                                )
+                                logging.info(f"场站 {station_id} 首次数据完整,开始处理")
                             else:
                                 # 数据不完整,不触发（等待更多数据）
                                 logging.debug(
@@ -715,6 +713,11 @@ class AsyncDataAnalysisService(ServiceBase):
             )
         )
         self._station_tasks[station_id] = task
+        # 增加任务计数，累计模型调用次数
+        self._task_count += 1
+        logging.info(
+            f"场站任务已创建 station_id={station_id}, 当前任务总数={self._task_count}"
+        )
 
     async def _station_worker(
         self, station_id, callback, result_handler, stop_flag, data_event

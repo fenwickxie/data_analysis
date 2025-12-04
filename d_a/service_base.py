@@ -28,7 +28,7 @@ class ServiceBase:
         self.topics = self._resolve_topics(module_name, topics)
         self.kafka_config = kafka_config
         self.data_expire_seconds = data_expire_seconds
-
+        self._task_count = 0  # 增加任务计数属性
         # 创建 dispatcher（子类可以覆盖）
         self.dispatcher = DataDispatcher(data_expire_seconds=data_expire_seconds)
 
@@ -72,4 +72,3 @@ class ServiceBase:
                 "未指定 module_name 或 topics,将订阅所有 topics,可能影响性能"
             )
             return list(TOPIC_TO_MODULES.keys())
-

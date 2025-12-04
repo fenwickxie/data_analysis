@@ -2,6 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
+author: xie.fangyu
+date: 2025-10-16 11:10:10
+project: data_analysis
+filename: main.py
+version: 1.0
+"""
+
+"""
 模型项目入口文件示例
 使用 data_analysis 包处理充电站数据
 
@@ -119,25 +127,29 @@ async def my_model_predict(module_input):
 async def my_callback(station_id, module_input):
     """
     单场站处理回调
-    
+
     Args:
         station_id: str, 场站ID
         module_input: dict, 模块输入数据
-    
+
     Returns:
         dict: 必须包含 'station_id' 字段的结果字典
         None: 处理失败
     """
+    # 检验数据质量
+    if module_input.get("_data_quality", {}).get("availability_ratio", 0) < 0.5:
+        logging.warning(f"场站 {station_id} 数据质量过低，跳过处理")
+        return None
     try:
         # 调用模型推理
         result = await my_model_predict(module_input)
-        
+
         # 在结果中添加 station_id（必需）
         result["station_id"] = station_id
-        
+
         logging.info(f"场站 {station_id} 处理成功")
         return result
-        
+
     except Exception as e:
         logging.error(f"场站 {station_id} 处理失败: {e}", exc_info=True)
         return None  # 返回None表示失败,不会阻塞批次上传
@@ -146,7 +158,7 @@ async def my_callback(station_id, module_input):
 async def batch_upload_handler(producer, output_topic, batch_id, results_list):
     """
     批次上传回调
-    
+
     Args:
         producer: Kafka生产者
         output_topic: 输出topic
@@ -175,55 +187,55 @@ async def batch_upload_handler(producer, output_topic, batch_id, results_list):
 # ===================== 主函数 =====================
 async def main():
     """主函数 - 启动数据分析服务"""
-    
+
     # 获取输出topic
     output_topic = MODULE_OUTPUT_TOPICS.get(MODULE_NAME)
     if not output_topic:
         raise RuntimeError(f"未配置模块 {MODULE_NAME} 的输出topic")
-    
+
     logging.info(f"启动模块: {MODULE_NAME}")
     logging.info(f"输出topic: {output_topic}")
-    
+
     # 创建Kafka生产者
     producer = AsyncKafkaProducerClient(KAFKA_CONFIG)
     await producer.start()
     logging.info("Kafka生产者已启动")
-    
+
     # 创建数据分析服务
     service = AsyncDataAnalysisService(module_name=MODULE_NAME)
-    
+
     # 定义批次上传处理器
     async def upload_handler(batch_id, results_list):
         await batch_upload_handler(producer, output_topic, batch_id, results_list)
-    
+
     # 启动服务
     await service.start(callback=my_callback, batch_upload_handler=upload_handler)
     logging.info("数据分析服务已启动")
-    
+
     try:
         # 打印服务状态
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print(f"服务已启动 - 模块: {MODULE_NAME}")
         print(f"多消费者模式: {service.consumer._multi_consumer_mode}")
-        
+
         if service.consumer._multi_consumer_mode:
             print(f"订阅的 topic 数量: {len(service.consumer._topic_consumers)}")
             for topic in service.consumer._topic_consumers.keys():
                 print(f"  - {topic}")
-        
+
         print("按 Ctrl+C 停止服务...")
-        print("="*60 + "\n")
-        
+        print("=" * 60 + "\n")
+
         # 主循环
         iteration = 0
         while True:
             iteration += 1
-            
+
             # 每隔10次迭代显示状态信息
             if iteration % 10 == 0:
                 status = service.get_station_status()
                 logging.info(f"第 {iteration} 次循环 - 活跃场站数: {len(status)}")
-                
+
                 # 显示消息积压信息（多消费者模式）
                 if service.consumer._multi_consumer_mode:
                     lag_info = service.consumer.get_lag_info()
@@ -231,45 +243,45 @@ async def main():
                         logging.info("消息积压情况:")
                         for topic, partitions in lag_info.items():
                             logging.info(f"  {topic}: {len(partitions)} 个分区")
-            
+
             # 使用多个短暂的 sleep 以提高响应性
             for _ in range(10):
                 await asyncio.sleep(1)
-                
+
     except (KeyboardInterrupt, asyncio.CancelledError) as e:
         logging.info(f"收到停止信号: {type(e).__name__},开始停机...")
-        
+
     finally:
         logging.info("正在停止服务...")
         await service.stop()
-        
+
         logging.info("正在停止生产者...")
         await producer.stop()
-        
+
         logging.info("服务已完全停止")
 
 
 if __name__ == "__main__":
     """
     程序入口
-    
+
     运行前确保:
     1. 已安装 data_analysis 包
     2. 当前目录下有 config.yaml 配置文件
     3. config.yaml 中正确配置了 module_name 和 Kafka 连接信息
     """
-    
+
     # 检查配置文件
     config_file = Path("config.yaml")
     if not config_file.exists():
         print("错误: 找不到 config.yaml 配置文件")
         print("请从 config.yaml.example 复制并修改配置")
         sys.exit(1)
-    
+
     # 创建并运行事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
+
     try:
         loop.run_until_complete(main())
     except KeyboardInterrupt:

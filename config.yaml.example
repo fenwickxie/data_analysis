@@ -84,7 +84,23 @@ topic_detail:
     window_size: 2  # 需要保留2秒数据：当前秒（聚合中）+ 上一秒（已完成,待处理）
   
   SCHEDULE-CAR-PRICE:
-    fields: ['stationId', 'FeeNo', 'startTime', 'endTime', 'periodType', 'gridPrice', 'serviceFee']
+    fields:
+      [
+        "stationId",
+        "FeeNo",
+        "startTime",
+        "endTime",
+        "ebbElectricFee",
+        "ebbServerFee",
+        "flatElectricFee",
+        "flatServerFee",
+        "peakElectricFee",
+        "peakServerFee",
+        "sharpElectricFee",
+        "sharpServerFee",
+        "otherElectricFee",
+        "otherServerFee",
+      ]
     frequency: '1月1次'
     modules: ['operation_optimization', 'electricity_price', 'evaluation_model', 'thermal_management']
     window_size: 1
