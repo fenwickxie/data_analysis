@@ -19,18 +19,47 @@ def load_config(config_path=None):
     """
     从YAML文件加载配置
     
+    查找优先级:
+    1. 显式指定的config_path参数
+    2. 环境变量 DATA_ANALYSIS_CONFIG_PATH
+    3. 当前工作目录下的config.yaml
+    4. 包自带的默认配置（开发环境）
+    
     Args:
-        config_path: 配置文件路径，默认为项目根目录下的config.yaml
+        config_path: 配置文件路径（可选）
         
     Returns:
         dict: 配置字典
+        
+    Raises:
+        FileNotFoundError: 找不到配置文件时抛出
     """
     if config_path is None:
-        # 获取项目根目录（config.py的上级目录）
-        current_dir = Path(__file__).parent.parent
-        config_path = current_dir / 'config.yaml'
+        # 优先级1: 检查环境变量
+        config_path = os.environ.get('DATA_ANALYSIS_CONFIG_PATH')
+        
+        if config_path is None:
+            # 优先级2: 检查当前工作目录（适用于wheel安装场景）
+            cwd_config = Path.cwd() / 'config.yaml'
+            if cwd_config.exists():
+                config_path = cwd_config
+            else:
+                # 优先级3: 使用包自带的默认配置（开发环境）
+                package_dir = Path(__file__).parent.parent
+                package_config = package_dir / 'config.yaml'
+                if package_config.exists():
+                    config_path = package_config
+                else:
+                    raise FileNotFoundError(
+                        f"找不到配置文件。请在以下位置之一提供config.yaml:\n"
+                        f"  1. 通过参数指定: load_config('path/to/config.yaml')\n"
+                        f"  2. 设置环境变量: DATA_ANALYSIS_CONFIG_PATH\n"
+                        f"  3. 当前工作目录: {cwd_config}\n"
+                        f"  4. 包目录: {package_config}"
+                    )
     
-    if not os.path.exists(config_path):
+    config_path = Path(config_path)
+    if not config_path.exists():
         raise FileNotFoundError(f"配置文件不存在: {config_path}")
     
     with open(config_path, 'r', encoding='utf-8') as f:
