@@ -71,7 +71,9 @@ class AsyncDataAnalysisService(ServiceBase):
 
         # 批次结果聚合器
         self.batch_aggregator = BatchResultAggregator(
-            batch_timeout=5.0, cleanup_interval=60.0  # 5秒超时
+            batch_timeout=5.0,  # 批次超时：5秒
+            cleanup_interval=60.0,  # 过期批次清理间隔：60秒
+            cleanup_delay=15.0  # 完成后延迟清理：15秒（给晚到场站留出窗口）
         )
 
         self._station_tasks = {}  # 每个场站的任务
@@ -807,12 +809,25 @@ class AsyncDataAnalysisService(ServiceBase):
                 if batch_id and self._batch_upload_handler:
                     batch_collector = self.batch_aggregator._batches.get(batch_id)
                     if batch_collector:
-                        await batch_collector.add_result(station_id, result)
-                        logging.info(f"场站 {station_id} 结果已提交到批次 {batch_id}")
+                        # 检查批次是否已经上传完成
+                        if batch_collector.uploaded:
+                            logging.info(
+                                f"场站 {station_id} 的批次 {batch_id} 已完成上传,跳过提交"
+                            )
+                            # 清除该场站的批次映射，避免重复检查
+                            self._station_batch_info.pop(station_id, None)
+                        else:
+                            await batch_collector.add_result(station_id, result)
+                            logging.info(
+                                f"场站 {station_id} 结果已提交到批次 {batch_id}"
+                            )
                     else:
                         logging.warning(
-                            f"场站 {station_id} 找不到批次 {batch_id},可用批次: {list(self.batch_aggregator._batches.keys())}"
+                            f"场站 {station_id} 找不到批次 {batch_id} (可能已被清理),"
+                            f"可用批次: {list(self.batch_aggregator._batches.keys())}"
                         )
+                        # 清除该场站的批次映射，避免重复告警
+                        self._station_batch_info.pop(station_id, None)
                 else:
                     if not batch_id:
                         logging.warning(f"场站 {station_id} 没有batch_id")
