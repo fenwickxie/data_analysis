@@ -130,7 +130,7 @@ topic_detail:
     window_size: 1
   
   SCHEDULE-DEVICE-PV:
-    fields: ['stationId', 'pvId', 'pvPreDcPower']
+    fields: ['stationId', 'hostCode', 'pvPreDcPower']
     frequency: '一天1次'
     modules: ['pv_prediction']
     window_size: 1
@@ -146,7 +146,7 @@ module_dependencies:
   electricity_price: ['pv_prediction', 'evaluation_model', 'SOH_model']
   station_guidance: ['load_prediction', 'evaluation_model']
   thermal_management: ['load_prediction', 'operation_optimization']
-  operation_optimization: ['pv_prediction']
+  operation_optimization: ['pv_prediction','load_prediction']
 
 # 模块输出配置
 module_output:

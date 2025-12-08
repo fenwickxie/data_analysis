@@ -404,7 +404,7 @@ class AsyncDataAnalysisService(ServiceBase):
     def _handle_device_pv(value):
         """
         处理 SCHEDULE-DEVICE-PV
-        输入格式: dict{str: any}: {'stationId': '...', ...}
+        输入格式: dict{str: list[dict, dict,...]}: {"photovoltaicMessage":[{"pvPreDcPower":list,"hostCode":str,"stationId":""}]}
         输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
         Args:
             value: JSON数据
@@ -414,10 +414,17 @@ class AsyncDataAnalysisService(ServiceBase):
         if not isinstance(value, dict):
             return []
 
-        station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        data_list = value.get("photovoltaicMessage")
+        if not data_list or not isinstance(data_list, list):
+            return []
+
+        station_data_list = []
+        for item in data_list:
+            if isinstance(item, dict):
+                station_id = item.get("stationId")
+                if station_id:
+                    station_data_list.append((station_id, item))
+        return station_data_list
 
     @staticmethod
     def _handle_model_output(value):
