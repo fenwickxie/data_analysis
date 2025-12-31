@@ -576,56 +576,83 @@ class AsyncKafkaConsumerClient:
         elif self.consumer:
             await self.consumer.stop()
 
-    def get_lag_info(self):
+    async def get_lag_info(self):
         """
         获取消息积压信息（lag）
 
         Returns:
-            dict: {topic: {partition: lag}}
+            dict: {topic: {partition: {current_offset, end_offset, lag}}}
         """
         lag_info = {}
 
         if self._multi_consumer_mode:
+            # 多消费者模式：并发获取所有topic的lag信息
+            tasks = []
+            topics_list = []
             for topic, consumer in self._topic_consumers.items():
-                try:
-                    lag_info[topic] = self._calculate_consumer_lag(consumer)
-                except Exception as e:
-                    logging.error(f"获取topic {topic} lag信息失败: {e}")
+                topics_list.append(topic)
+                tasks.append(self._calculate_consumer_lag(consumer))
+            
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for topic, result in zip(topics_list, results):
+                if isinstance(result, Exception):
+                    logging.error(f"获取topic {topic} lag信息失败: {result}")
                     lag_info[topic] = {}
+                else:
+                    lag_info[topic] = result
         elif self.consumer:
             try:
                 # 单消费者模式：按topic分组
                 all_partitions = self.consumer.assignment()
+                if not all_partitions:
+                    return lag_info
+                
+                # 异步获取end offsets
+                end_offsets = await self.consumer.end_offsets(all_partitions)
+                
                 for tp in all_partitions:
                     topic = tp.topic
                     if topic not in lag_info:
                         lag_info[topic] = {}
 
-                    position = self.consumer.position(tp)
-                    # 注意：这需要同步调用,在异步环境中可能有问题
-                    # 生产环境建议使用专门的监控工具
+                    current_offset = await self.consumer.position(tp)
+                    end_offset = end_offsets.get(tp, current_offset)
+                    lag = end_offset - current_offset
+                    
                     lag_info[topic][tp.partition] = {
-                        "current_offset": position,
-                        "lag": "N/A",  # aiokafka 不直接支持获取end offset
+                        "current_offset": current_offset,
+                        "end_offset": end_offset,
+                        "lag": lag,
                     }
             except Exception as e:
-                logging.error(f"获取lag信息失败: {e}")
+                logging.error(f"获取lag信息失败: {e}", exc_info=True)
 
         return lag_info
 
-    def _calculate_consumer_lag(self, consumer):
+    async def _calculate_consumer_lag(self, consumer):
         """计算单个消费者的lag"""
         lag_by_partition = {}
         try:
             partitions = consumer.assignment()
+            if not partitions:
+                return lag_by_partition
+            
+            # 异步获取end offsets
+            end_offsets = await consumer.end_offsets(partitions)
+            
             for tp in partitions:
-                position = consumer.position(tp)
+                current_offset = await consumer.position(tp)
+                end_offset = end_offsets.get(tp, current_offset)
+                lag = end_offset - current_offset
+                
                 lag_by_partition[tp.partition] = {
-                    "current_offset": position,
-                    "lag": "N/A",
+                    "current_offset": current_offset,
+                    "end_offset": end_offset,
+                    "lag": lag,
                 }
         except Exception as e:
-            logging.error(f"计算lag失败: {e}")
+            logging.error(f"计算lag失败: {e}", exc_info=True)
         return lag_by_partition
 
 

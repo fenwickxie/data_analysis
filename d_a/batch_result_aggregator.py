@@ -26,16 +26,19 @@ class BatchResultAggregator:
     
     def __init__(
         self,
-        batch_timeout: float = 5.0,
-        cleanup_interval: float = 60.0
+        batch_timeout: float = 10.0,
+        cleanup_interval: float = 60.0,
+        cleanup_delay: float = 15.0
     ):
         """
         Args:
             batch_timeout: 批次超时时间（秒）,超时后即使部分场站未完成也会上传
             cleanup_interval: 清理过期批次的间隔（秒）
+            cleanup_delay: 批次完成后延迟清理的时间（秒）,为晚到场站留出提交窗口
         """
         self.batch_timeout = batch_timeout
         self.cleanup_interval = cleanup_interval
+        self.cleanup_delay = cleanup_delay
         
         # 批次数据: {batch_id: BatchCollector}
         self._batches: Dict[str, 'BatchCollector'] = {}
@@ -95,10 +98,8 @@ class BatchResultAggregator:
             )
             await collector.force_complete()
         finally:
-            # 清理批次
-            async with self._lock:
-                if batch_id in self._batches:
-                    del self._batches[batch_id]
+            # 允许批次在完成后保留一段时间,避免晚到场站出现找不到批次
+            asyncio.create_task(self._schedule_batch_cleanup(batch_id))
     
     async def get_or_create_batch(
         self,
@@ -139,6 +140,20 @@ class BatchResultAggregator:
             if expired:
                 logging.info(f"清理了 {len(expired)} 个过期批次")
 
+    async def _schedule_batch_cleanup(self, batch_id: str):
+        """延迟清理批次,为晚到的场站留出提交窗口"""
+        await asyncio.sleep(self.cleanup_delay)
+        async with self._lock:
+            collector = self._batches.get(batch_id)
+            if collector and collector.uploaded:
+                del self._batches[batch_id]
+                logging.info(
+                    f"批次 {batch_id} 已完成并清理 "
+                    f"(创建时间: {collector.created_at:.2f}, "
+                    f"完成时间: {collector.completed_at:.2f}, "
+                    f"结果数: {collector.completed_count}/{collector.expected_count})"
+                )
+
 
 class BatchCollector:
     """
@@ -158,6 +173,7 @@ class BatchCollector:
         self.upload_callback = upload_callback
         self.timeout = timeout
         self.created_at = time.time()
+        self.completed_at: Optional[float] = None
         
         # 结果存储: {station_id: result_dict}
         self._results: Dict[str, Optional[Dict]] = {}
@@ -214,6 +230,7 @@ class BatchCollector:
             return
         
         self._uploaded = True
+        self.completed_at = time.time()
         
         # 构建结果列表（过滤掉None）
         results_list = [
@@ -242,3 +259,8 @@ class BatchCollector:
         finally:
             # 标记完成
             self._completed.set()
+
+    @property
+    def uploaded(self) -> bool:
+        """批次是否已上传完成"""
+        return self._uploaded

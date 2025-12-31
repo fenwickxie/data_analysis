@@ -71,7 +71,9 @@ class AsyncDataAnalysisService(ServiceBase):
 
         # 批次结果聚合器
         self.batch_aggregator = BatchResultAggregator(
-            batch_timeout=5.0, cleanup_interval=60.0  # 5秒超时
+            batch_timeout=5.0,  # 批次超时：5秒
+            cleanup_interval=60.0,  # 过期批次清理间隔：60秒
+            cleanup_delay=15.0  # 完成后延迟清理：15秒（给晚到场站留出窗口）
         )
 
         self._station_tasks = {}  # 每个场站的任务
@@ -138,7 +140,7 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, list):
-            return []
+            raise ValueError("SCHEDULE-STATION-PARAM expect list")
 
         station_data_list = []
         for item in value:
@@ -146,6 +148,8 @@ class AsyncDataAnalysisService(ServiceBase):
                 station_id = item.get("stationId")
                 if station_id:
                     station_data_list.append((station_id, item))
+            else:
+                raise ValueError("SCHEDULE-STATION-PARAM item expect dict")
         return station_data_list
 
     @staticmethod
@@ -160,10 +164,14 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, [data1, data2, ...]), ...],按 stationId 分组并排序
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-STATION-REALTIME-DATA expect dict")
 
         data_list = value.get("realTimeData")
-        if not data_list or not isinstance(data_list, list):
+        if data_list is None:
+            raise ValueError("SCHEDULE-STATION-REALTIME-DATA missing realTimeData")
+        if not isinstance(data_list, list):
+            raise ValueError("SCHEDULE-STATION-REALTIME-DATA.realTimeData expect list")
+        if not data_list:
             return []
 
         # 按场站分组
@@ -197,7 +205,9 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [("__global__", data)]
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-ENVIRONMENT-CALENDAR expect dict")
+        if "calendar" not in value:
+            raise ValueError("SCHEDULE-ENVIRONMENT-CALENDAR missing calendar")
         return [("__global__", value)]
 
     @staticmethod
@@ -216,10 +226,14 @@ class AsyncDataAnalysisService(ServiceBase):
 
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-ENVIRONMENT-WEATHER expect dict")
 
         data_list = value.get("weather")
-        if not data_list or not isinstance(data_list, list):
+        if data_list is None:
+            raise ValueError("SCHEDULE-ENVIRONMENT-WEATHER missing weather")
+        if not isinstance(data_list, list):
+            raise ValueError("SCHEDULE-ENVIRONMENT-WEATHER.weather expect list")
+        if not data_list:
             return []
 
         station_data_list = []
@@ -242,12 +256,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-METER expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-DEVICE-METER missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_device_gun(value):
@@ -261,12 +275,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-GUN expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-DEVICE-GUN missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_car_order(value):
@@ -280,12 +294,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-CAR-ORDER expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-CAR-ORDER missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_car_price(value):
@@ -299,10 +313,14 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-CAR-PRICE expect dict")
 
         data_list = value.get("fee")
-        if not data_list or not isinstance(data_list, list):
+        if data_list is None:
+            raise ValueError("SCHEDULE-CAR-PRICE missing fee")
+        if not isinstance(data_list, list):
+            raise ValueError("SCHEDULE-CAR-PRICE.fee expect list")
+        if not data_list:
             return []
 
         # 按场站分组
@@ -336,12 +354,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-ERROR expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-DEVICE-ERROR missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_device_host_dcdc(value):
@@ -355,12 +373,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-HOST-DCDC expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-DEVICE-HOST-DCDC missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_device_host_acdc(value):
@@ -374,12 +392,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-HOST-ACDC expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-DEVICE-HOST-ACDC missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_device_storage(value):
@@ -393,12 +411,12 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-STORAGE expect dict")
 
         station_id = value.get("stationId")
-        if station_id:
-            return [(station_id, value)]
-        return []
+        if not station_id:
+            raise ValueError("SCHEDULE-DEVICE-STORAGE missing stationId")
+        return [(station_id, value)]
 
     @staticmethod
     def _handle_device_pv(value):
@@ -412,10 +430,14 @@ class AsyncDataAnalysisService(ServiceBase):
             list: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
-            return []
+            raise ValueError("SCHEDULE-DEVICE-PV expect dict")
 
         data_list = value.get("photovoltaicMessage")
-        if not data_list or not isinstance(data_list, list):
+        if data_list is None:
+            raise ValueError("SCHEDULE-DEVICE-PV missing photovoltaicMessage")
+        if not isinstance(data_list, list):
+            raise ValueError("SCHEDULE-DEVICE-PV.photovoltaicMessage expect list")
+        if not data_list:
             return []
 
         station_data_list = []
@@ -434,16 +456,24 @@ class AsyncDataAnalysisService(ServiceBase):
         输出格式: list[tuple(str, dict)]: [(station_id, data), ...],按 stationId 分组
         """
         if not isinstance(value, dict):
+            raise ValueError("MODULE-OUTPUT expect dict")
+
+        if "results" not in value:
+            raise ValueError("MODULE-OUTPUT missing results")
+        results = value.get("results", [])
+        if not isinstance(results, list):
+            raise ValueError("MODULE-OUTPUT.results expect list")
+        if not results:
             return []
 
         station_data_list = []
-        results = value.get("results", [])
-        if isinstance(results, list):
-            for item in results:
-                if isinstance(item, dict):
-                    station_id = item.get("station_id")
-                    if station_id:
-                        station_data_list.append((station_id, item))
+        for item in results:
+            if not isinstance(item, dict):
+                raise ValueError("MODULE-OUTPUT.results item expect dict")
+            station_id = item.get("station_id")
+            if not station_id:
+                raise ValueError("MODULE-OUTPUT.results item missing station_id")
+            station_data_list.append((station_id, item))
         return station_data_list
 
     async def _maybe_await(self, func, *args):
@@ -480,11 +510,18 @@ class AsyncDataAnalysisService(ServiceBase):
             else:
                 # 直接调用对应的处理器
                 station_data_list = handler(value)
-
+                
             return await self._process_message_with_parsed_data(
                 msg, value, station_data_list, batch_id
             )
 
+        except ValueError as exc:
+            # 结构/必填字段错误：记录警告但仍推进offset，避免重放
+            logging.warning(
+                f"消息结构不合法 topic={topic}, offset={msg.offset}: {exc}"
+            )
+            self.offset_manager.track_message(msg)
+            return True, []
         except Exception as exc:
             handle_error(
                 exc,
@@ -552,7 +589,9 @@ class AsyncDataAnalysisService(ServiceBase):
         try:
             if not station_data_list:
                 logging.debug(f"消息中没有提取到场站数据: topic={topic}")
-                return False, []
+                # 语法正确但业务数据为空的消息,直接标记已处理以推进offset
+                self.offset_manager.track_message(msg)
+                return True, []
 
             # 提取场站列表（排除全局数据）
             station_ids = [sid for sid, _ in station_data_list if sid != "__global__"]
@@ -807,12 +846,25 @@ class AsyncDataAnalysisService(ServiceBase):
                 if batch_id and self._batch_upload_handler:
                     batch_collector = self.batch_aggregator._batches.get(batch_id)
                     if batch_collector:
-                        await batch_collector.add_result(station_id, result)
-                        logging.info(f"场站 {station_id} 结果已提交到批次 {batch_id}")
+                        # 检查批次是否已经上传完成
+                        if batch_collector.uploaded:
+                            logging.info(
+                                f"场站 {station_id} 的批次 {batch_id} 已完成上传,跳过提交"
+                            )
+                            # 清除该场站的批次映射，避免重复检查
+                            self._station_batch_info.pop(station_id, None)
+                        else:
+                            await batch_collector.add_result(station_id, result)
+                            logging.info(
+                                f"场站 {station_id} 结果已提交到批次 {batch_id}"
+                            )
                     else:
                         logging.warning(
-                            f"场站 {station_id} 找不到批次 {batch_id},可用批次: {list(self.batch_aggregator._batches.keys())}"
+                            f"场站 {station_id} 找不到批次 {batch_id} (可能已被清理),"
+                            f"可用批次: {list(self.batch_aggregator._batches.keys())}"
                         )
+                        # 清除该场站的批次映射，避免重复告警
+                        self._station_batch_info.pop(station_id, None)
                 else:
                     if not batch_id:
                         logging.warning(f"场站 {station_id} 没有batch_id")
