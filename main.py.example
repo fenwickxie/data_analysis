@@ -238,11 +238,19 @@ async def main():
 
                 # 显示消息积压信息（多消费者模式）
                 if service.consumer._multi_consumer_mode:
-                    lag_info = service.consumer.get_lag_info()
+                    lag_info = await service.consumer.get_lag_info()
                     if lag_info:
                         logging.info("消息积压情况:")
                         for topic, partitions in lag_info.items():
-                            logging.info(f"  {topic}: {len(partitions)} 个分区")
+                            total_lag = sum(p.get("lag", 0) for p in partitions.values())
+                            logging.info(f"  {topic}: {len(partitions)} 个分区, 总积压: {total_lag} 条")
+                            for partition_id, info in partitions.items():
+                                logging.info(
+                                    f"    分区 {partition_id}: "
+                                    f"当前offset={info.get('current_offset', 'N/A')}, "
+                                    f"最新offset={info.get('end_offset', 'N/A')}, "
+                                    f"积压={info.get('lag', 'N/A')} 条"
+                                )
 
             # 使用多个短暂的 sleep 以提高响应性
             for _ in range(10):
