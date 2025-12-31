@@ -482,7 +482,7 @@ class AsyncDataAnalysisService(ServiceBase):
             else:
                 # 直接调用对应的处理器
                 station_data_list = handler(value)
-
+                
             return await self._process_message_with_parsed_data(
                 msg, value, station_data_list, batch_id
             )
@@ -554,7 +554,9 @@ class AsyncDataAnalysisService(ServiceBase):
         try:
             if not station_data_list:
                 logging.debug(f"消息中没有提取到场站数据: topic={topic}")
-                return False, []
+                # 语法正确但业务数据为空的消息,直接标记已处理以推进offset
+                self.offset_manager.track_message(msg)
+                return True, []
 
             # 提取场站列表（排除全局数据）
             station_ids = [sid for sid, _ in station_data_list if sid != "__global__"]
