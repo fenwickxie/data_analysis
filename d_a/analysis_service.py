@@ -593,20 +593,49 @@ class AsyncDataAnalysisService(ServiceBase):
                 self.offset_manager.track_message(msg)
                 return True, []
 
-            # 提取场站列表（排除全局数据）
-            station_ids = [sid for sid, _ in station_data_list if sid != "__global__"]
+            # 两阶段处理 - 先处理所有全局数据，再处理场站数据
+            # 收集场站ID和全局数据（避免重复遍历）
+            station_ids = []
+            global_data_items = []
+            for station_id, station_data in station_data_list:
+                if station_id == "__global__":
+                    global_data_items.append((topic, station_data))
+                else:
+                    # collect station ids
+                    station_ids.append(station_id)
 
-            # 处理每个场站的数据
+            # 阶段1：处理全局数据
+            if global_data_items and self._station_tasks:
+                # 批量应用：一次遍历场站列表，应用所有全局数据
+                existing_stations = list(self._station_tasks.keys())
+                for global_topic, global_data in global_data_items:
+                    # 缓存全局数据
+                    self._global_data_cache[global_topic] = global_data
+                    # 批量应用到所有场站
+                    for existing_station_id in existing_stations:
+                        self.dispatcher.update_topic_data(
+                            existing_station_id,
+                            global_topic,
+                            global_data,
+                            kafka_timestamp,
+                        )
+                logging.info(
+                    f"批量应用 {len(global_data_items)} 个全局数据到 {len(existing_stations)} 个场站"
+                )
+            elif global_data_items:
+                # 只缓存，没有场站需要应用
+                for global_topic, global_data in global_data_items:
+                    self._global_data_cache[global_topic] = global_data
+                logging.info(f"全局数据已缓存: {[t for t, _ in global_data_items]}")
+
+            # 阶段2：处理场站数据
             all_success = True
             for station_id, station_data in station_data_list:
+                # 跳过全局数据（已在阶段1处理）
+                if station_id == "__global__":
+                    continue
+                
                 try:
-                    # 处理全局数据
-                    if station_id == "__global__":
-                        # 缓存全局数据（最新的）
-                        self._global_data_cache[topic] = station_data
-                        logging.info(f"全局数据已缓存 topic={topic},等待场站注册")
-                        continue
-
                     # 处理场站数据
                     # 将原始数据交给dispatcher（使用Kafka原生时间戳）
                     should_trigger = self.dispatcher.update_topic_data(

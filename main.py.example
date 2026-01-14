@@ -219,8 +219,8 @@ async def main():
         print(f"多消费者模式: {service.consumer._multi_consumer_mode}")
 
         if service.consumer._multi_consumer_mode:
-            print(f"订阅的 topic 数量: {len(service.consumer._topic_consumers)}")
-            for topic in service.consumer._topic_consumers.keys():
+            print(f"订阅的 topic 数量: {len(service.consumer.topics)}")
+            for topic in service.consumer.topics:
                 print(f"  - {topic}")
 
         print("按 Ctrl+C 停止服务...")
