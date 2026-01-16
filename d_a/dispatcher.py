@@ -151,6 +151,8 @@ class DataDispatcher:
             "SCHEDULE-DEVICE-HOST-DCDC": self._update_device_host_dcdc,
             "SCHEDULE-DEVICE-HOST-ACDC": self._update_device_host_acdc,
             "SCHEDULE-DEVICE-STORAGE": self._update_device_storage,
+            "SCHEDULE-ENVIRONMENT-WEATHER": self._update_environment_weather,
+            "SCHEDULE-DEVICE-PV": self._update_device_pv,
         }
 
         # 自动添加模型输出topic更新器
