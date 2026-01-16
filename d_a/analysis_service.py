@@ -73,7 +73,7 @@ class AsyncDataAnalysisService(ServiceBase):
         self.batch_aggregator = BatchResultAggregator(
             batch_timeout=5.0,  # 批次超时：5秒
             cleanup_interval=60.0,  # 过期批次清理间隔：60秒
-            cleanup_delay=15.0  # 完成后延迟清理：15秒（给晚到场站留出窗口）
+            cleanup_delay=30.0  # 完成后延迟清理：30秒（给晚到场站留出更多窗口）
         )
 
         self._station_tasks = {}  # 每个场站的任务
@@ -643,7 +643,16 @@ class AsyncDataAnalysisService(ServiceBase):
                     )
 
                     # 记录场站的批次信息
-                    self._station_batch_info[station_id] = batch_id
+                    # 🔧 修复：只有当 batch_id 有效时才更新映射
+                    if batch_id:
+                        # 检查批次是否仍然存在
+                        if batch_id in self.batch_aggregator._batches:
+                            self._station_batch_info[station_id] = batch_id
+                        else:
+                            # 批次已完成/清理，不更新映射（保留旧的batch_id或None）
+                            logging.debug(
+                                f"批次 {batch_id} 已清理，场站 {station_id} 保持当前映射"
+                            )
 
                     # 创建场站任务（如果不存在）
                     if station_id not in self._station_tasks:
@@ -832,6 +841,14 @@ class AsyncDataAnalysisService(ServiceBase):
 
                 # 获取场站的批次ID
                 batch_id = self._station_batch_info.get(station_id)
+                
+                # 验证批次是否仍然有效
+                if batch_id and batch_id not in self.batch_aggregator._batches:
+                    logging.debug(
+                        f"场站 {station_id} 的批次 {batch_id} 已清理，清除映射"
+                    )
+                    self._station_batch_info.pop(station_id, None)
+                    batch_id = None  # 重置为 None
 
                 # 获取解析后的输入数据（只获取指定模块的输入）
                 if self.module_name:
@@ -882,6 +899,7 @@ class AsyncDataAnalysisService(ServiceBase):
                             )
                             # 清除该场站的批次映射，避免重复检查
                             self._station_batch_info.pop(station_id, None)
+                            batch_id = None  # 重置为 None
                         else:
                             await batch_collector.add_result(station_id, result)
                             logging.info(
@@ -894,6 +912,7 @@ class AsyncDataAnalysisService(ServiceBase):
                         )
                         # 清除该场站的批次映射，避免重复告警
                         self._station_batch_info.pop(station_id, None)
+                        batch_id = None  # 重置为 None
                 else:
                     if not batch_id:
                         logging.warning(f"场站 {station_id} 没有batch_id")
