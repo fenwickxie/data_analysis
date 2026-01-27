@@ -992,9 +992,19 @@ class AsyncDataAnalysisService(ServiceBase):
                                 if sid != "__global__"
                             ]
                             all_station_ids.extend(station_ids)
+                    except ValueError as exc:
+                        # 数据结构/必填字段错误：记录警告并标记为已处理,推进offset避免重放
+                        logging.warning(
+                            f"消息结构不合法 topic={msg.topic}, offset={msg.offset}: {exc}"
+                        )
+                        self.offset_manager.track_message(msg)
+                        # 不添加到 parsed_messages,直接跳过
                     except Exception as exc:
-                        logging.error(f"解析消息失败: {exc}")
-                        # 即使解析失败,也要保留消息以便后续错误处理
+                        # 其他异常（如JSON解析失败）：保留消息但标记为失败
+                        logging.error(
+                            f"解析消息失败 topic={msg.topic}, offset={msg.offset}: {exc}"
+                        )
+                        # 保留消息以便后续错误处理,但不会被处理
                         parsed_messages.append((msg, None, None))
 
                 # 1. 先创建批次（如果有场站数据且配置了上传回调）
@@ -1013,7 +1023,11 @@ class AsyncDataAnalysisService(ServiceBase):
                 # 2. 再处理所有消息（使用缓存的解析结果）
                 for msg, value, station_data_list in parsed_messages:
                     if value is None or station_data_list is None:
-                        # 跳过解析失败的消息
+                        # 解析失败的消息：标记为已处理,推进offset避免堆积
+                        logging.warning(
+                            f"跳过解析失败的消息 topic={msg.topic}, offset={msg.offset}"
+                        )
+                        self.offset_manager.track_message(msg)
                         continue
 
                     # 使用预解析的数据进行处理
