@@ -125,7 +125,25 @@ class AsyncDataAnalysisService(ServiceBase):
                 handlers[topic_name] = self._handle_model_output
 
         return handlers
-
+    
+    @staticmethod
+    def _safe_get_message_value(msg, max_length=500):
+        """安全获取消息内容用于日志"""
+        try:
+            if not msg.value:
+                return "<空消息>"
+            msg_value = msg.value.decode("utf-8", errors="replace")
+            if len(msg_value) > max_length:
+                return msg_value[:max_length] + "...(已截断)"
+            return msg_value
+        except Exception:
+            ## 解码失败，使用十六进制
+            # try:
+            #     hex_data = msg.value[:50].hex() if len(msg.value) > 50 else msg.value.hex()
+            #     return f"<二进制: {hex_data}{'...' if len(msg.value) > 50 else ''}>"
+            # except Exception:
+            return "<无法读取>"
+            
     # ==================== Topic 处理器：每个 topic 独立方法 ====================
 
     @staticmethod
@@ -992,20 +1010,16 @@ class AsyncDataAnalysisService(ServiceBase):
                                 if sid != "__global__"
                             ]
                             all_station_ids.extend(station_ids)
-                    except ValueError as exc:
-                        # 数据结构/必填字段错误：记录警告并标记为已处理,推进offset避免重放
-                        logging.warning(
-                            f"消息结构不合法 topic={msg.topic}, offset={msg.offset}: {exc}"
-                        )
-                        self.offset_manager.track_message(msg)
-                        # 不添加到 parsed_messages,直接跳过
+
                     except Exception as exc:
                         # 其他异常（如JSON解析失败）：保留消息但标记为失败
+                        msg_value = self._safe_get_message_value(msg)
                         logging.error(
-                            f"解析消息失败 topic={msg.topic}, offset={msg.offset}: {exc}"
+                            f"解析消息失败 topic={msg.topic}, offset={msg.offset}, value={msg_value}: {exc}"
                         )
                         # 保留消息以便后续错误处理,但不会被处理
-                        parsed_messages.append((msg, None, None))
+                        self.offset_manager.track_message(msg)
+                        # parsed_messages.append((msg, None, None))
 
                 # 1. 先创建批次（如果有场站数据且配置了上传回调）
                 if all_station_ids and self._batch_upload_handler:
