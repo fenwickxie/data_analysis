@@ -23,11 +23,40 @@ from .errors import (
     handle_error,
 )
 
+# ---- 测试工具（仅用于测试环境，勿在生产环境中使用）----
+from .mock_data import (
+    MockDataManager,
+    MockProvider,
+    StaticMockProvider,
+    RandomMockProvider,
+    CallableMockProvider,
+    SequenceMockProvider,
+    MultiDeviceMockProvider,
+)
+from .mock_presets import (
+    apply_default_mocks,
+    build_preset_provider,
+    list_preset_topics,
+)
+
 __all__ = [
+    # 核心服务
     "DataAnalysisService",
     "AsyncDataAnalysisService",
+    # 异常与错误处理
     "DataAnalysisError",
     "KafkaConnectionError",
     "DispatcherError",
     "handle_error",
+    # 测试工具 - 虚拟数据注入
+    "MockDataManager",
+    "MockProvider",
+    "StaticMockProvider",
+    "RandomMockProvider",
+    "CallableMockProvider",
+    "SequenceMockProvider",
+    "MultiDeviceMockProvider",
+    "apply_default_mocks",
+    "build_preset_provider",
+    "list_preset_topics",
 ]
