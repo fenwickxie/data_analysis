@@ -10,7 +10,7 @@ version: 1.0
 description: 虚拟数据注入模块 - 用于测试时补全缺失的 topic 数据
 
 使用方式:
-    from d_a.mock_data import MockDataManager, StaticMockProvider, RandomMockProvider
+    from d_a.mock import MockDataManager, StaticMockProvider, RandomMockProvider
     from d_a.dispatcher import DataDispatcher
 
     dispatcher = DataDispatcher()

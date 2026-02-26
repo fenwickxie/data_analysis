@@ -26,7 +26,7 @@ if str(project_root) not in sys.path:
 
 import pytest
 from d_a.dispatcher import DataDispatcher
-from d_a.mock_data import (
+from d_a.mock.mock_data import (
     CallableMockProvider,
     MockDataManager,
     MultiDeviceMockProvider,
@@ -34,7 +34,7 @@ from d_a.mock_data import (
     SequenceMockProvider,
     StaticMockProvider,
 )
-from d_a.mock_presets import (
+from d_a.mock.mock_presets import (
     apply_default_mocks,
     build_preset_provider,
     list_preset_topics,

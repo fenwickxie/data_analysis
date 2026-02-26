@@ -11,8 +11,8 @@ description: 预定义虚拟数据集合 - 常见 topic 的默认 mock 数据
 
 快速使用::
 
-    from d_a.mock_data import MockDataManager
-    from d_a.mock_presets import apply_default_mocks, build_preset_provider
+    from d_a.mock import MockDataManager
+    from d_a.mock import apply_default_mocks, build_preset_provider
     from d_a.dispatcher import DataDispatcher
 
     dispatcher = DataDispatcher()
