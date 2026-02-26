@@ -24,21 +24,7 @@ from .errors import (
 )
 
 # ---- 测试工具（仅用于测试环境，勿在生产环境中使用）----
-from .mock import (
-    MockDataManager,
-    MockProvider,
-    StaticMockProvider,
-    RandomMockProvider,
-    CallableMockProvider,
-    SequenceMockProvider,
-    MultiDeviceMockProvider,
-)
-from .mock import (
-    apply_default_mocks,
-    build_preset_provider,
-    list_preset_topics,
-)
-
+from . import mock
 __all__ = [
     # 核心服务
     "DataAnalysisService",
@@ -49,14 +35,5 @@ __all__ = [
     "DispatcherError",
     "handle_error",
     # 测试工具 - 虚拟数据注入
-    "MockDataManager",
-    "MockProvider",
-    "StaticMockProvider",
-    "RandomMockProvider",
-    "CallableMockProvider",
-    "SequenceMockProvider",
-    "MultiDeviceMockProvider",
-    "apply_default_mocks",
-    "build_preset_provider",
-    "list_preset_topics",
+    "mock",
 ]

@@ -121,7 +121,7 @@ def main():
     print("✅ 构建完成!")
     print("=" * 60)
     print("\n📦 使用方法:")
-    print("  pip install dist/data_analysis-2.0.0-py3-none-any.whl")
+    print("  pip install dist/data_analysis-xxx-py3-none-any.whl")
     print("\n💡 提示:")
     print("  - 在模型项目中安装此 wheel 文件")
     print("  - 复制 config.yaml.example 和 main.py.example 到模型项目")
