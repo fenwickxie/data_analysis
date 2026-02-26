@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+﻿#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
 """
@@ -6,7 +6,7 @@ author: xie.fangyu
 date: 2025-10-16 11:10:10
 project: data_analysis
 filename: main.py
-version: 1.0
+version: 2.0
 """
 
 """
@@ -20,10 +20,18 @@ version: 1.0
 4. 修改 config.yaml 中的 module_name 为你的模块名称
 5. 实现 my_model_predict 函数中的模型推理逻辑，或导入已封装好的模型推理函数入口
 6. 运行: python main.py
+
+本地测试（场站 topic 数据缺失时自动用虚拟数据补全）:
+   MOCK_DATA=1 python main.py
+   MOCK_DATA=1 MOCK_STATIONS=station_001,station_002 python main.py
+
+强制用虚拟数据覆盖所有 topic（完全脱离 Kafka，纯本地闭环测试）:
+   MOCK_DATA=1 MOCK_FORCE=1 MOCK_STATIONS=station_001 python main.py
 """
 
 import asyncio
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -42,6 +50,19 @@ logging.basicConfig(
 from d_a.analysis_service import AsyncDataAnalysisService
 from d_a.kafka_client import AsyncKafkaProducerClient
 from d_a.config import KAFKA_CONFIG, MODULE_OUTPUT_TOPICS, MODULE_NAME
+
+
+# ===================== 虚拟数据开关 =====================
+# 环境变量说明见 mock_config.py 文件头部注释。
+from d_a.mock import (
+    ENABLE_MOCK,
+    MOCK_FORCE,
+    MOCK_STATIONS,
+    build_mock_manager,
+    make_station_init_hook,
+    mock_auto_inject_loop,
+    mock_startup_inject,
+)
 
 
 # ===================== 模型推理函数，模型封装入口范例（异步） =====================
@@ -188,41 +209,78 @@ async def batch_upload_handler(producer, output_topic, batch_id, results_list):
 async def main():
     """主函数 - 启动数据分析服务"""
 
-    # 获取输出topic
+    # 获取输出 topic
     output_topic = MODULE_OUTPUT_TOPICS.get(MODULE_NAME)
     if not output_topic:
-        raise RuntimeError(f"未配置模块 {MODULE_NAME} 的输出topic")
+        raise RuntimeError(f"未配置模块 {MODULE_NAME} 的输出 topic")
 
     logging.info(f"启动模块: {MODULE_NAME}")
-    logging.info(f"输出topic: {output_topic}")
+    logging.info(f"输出 topic: {output_topic}")
+    if ENABLE_MOCK:
+        logging.warning("⚠️  虚拟数据模式已启用（MOCK_DATA=1），仅用于测试！")
 
-    # 创建Kafka生产者
+    # 创建 Kafka 生产者
     producer = AsyncKafkaProducerClient(KAFKA_CONFIG)
     await producer.start()
-    logging.info("Kafka生产者已启动")
+    logging.info("Kafka 生产者已启动")
 
     # 创建数据分析服务
     service = AsyncDataAnalysisService(module_name=MODULE_NAME)
 
-    # 定义批次上传处理器
+    # ----------------------------------------------------------------
+    # 虚拟数据初始化
+    # ----------------------------------------------------------------
+    mock_mgr = None
+    mock_task = None
+
+    if ENABLE_MOCK:
+        mock_mgr = build_mock_manager(service)
+
+        # ✅ 注册场站初始化钩子：在 _station_worker 启动前同步注入，零时间窗口
+        # 对 Kafka 动态发现的新场站兜底，无需手动干预
+        service._station_init_hook = make_station_init_hook(mock_mgr)
+
+        # ✅ 对环境变量指定的场站立即预注入（Kafka 消息到达前先填充数据）
+        # 与 mock_startup_inject 互为补充：
+        #   MOCK_STATIONS 适合命令行快速指定；mock_startup_inject 适合代码中固定配置
+        if MOCK_STATIONS:
+            logging.info(f"[MockData] MOCK_STATIONS 预注入: {MOCK_STATIONS}")
+            for station_id in MOCK_STATIONS:
+                results = mock_mgr.inject_all(station_id, force=MOCK_FORCE)
+                success = [t for t, ok in results.items() if ok]
+                logging.info(f"[MockData] 预注入 {station_id}: {success}")
+
+        # ✅ 代码中固定的启动注入（根据 build_mock_manager 中的场景配置）
+        mock_startup_inject(mock_mgr)
+
+        # 启动后台任务（非 force: 兜底一次；force: 持续刷新）
+        mock_task = asyncio.create_task(
+            mock_auto_inject_loop(mock_mgr, service, service._stop_event)
+        )
+
+    # ----------------------------------------------------------------
+    # 定义批次上传处理器并启动服务
+    # ----------------------------------------------------------------
     async def upload_handler(batch_id, results_list):
         await batch_upload_handler(producer, output_topic, batch_id, results_list)
 
-    # 启动服务
     await service.start(callback=my_callback, batch_upload_handler=upload_handler)
     logging.info("数据分析服务已启动")
 
     try:
-        # 打印服务状态
         print("\n" + "=" * 60)
         print(f"服务已启动 - 模块: {MODULE_NAME}")
+        if ENABLE_MOCK:
+            mode = "已启用（强制覆盖所有 topic）" if MOCK_FORCE else "已启用（仅补全缺失 topic）"
+            print(f"虚拟数据: {mode}")
+            print(f"预注入场站: {MOCK_STATIONS or '（等待 Kafka 动态发现）'}")
+            for rule in mock_mgr.get_registry_info():
+                print(f"  [{rule['station_id']:>12}] {rule['topic']} -> {rule['provider']}")
         print(f"多消费者模式: {service.consumer._multi_consumer_mode}")
-
         if service.consumer._multi_consumer_mode:
             print(f"订阅的 topic 数量: {len(service.consumer.topics)}")
             for topic in service.consumer.topics:
                 print(f"  - {topic}")
-
         print("按 Ctrl+C 停止服务...")
         print("=" * 60 + "\n")
 
@@ -231,10 +289,27 @@ async def main():
         while True:
             iteration += 1
 
-            # 每隔10次迭代显示状态信息
+            # 每隔 10 次迭代显示状态
             if iteration % 10 == 0:
                 status = service.get_station_status()
                 logging.info(f"第 {iteration} 次循环 - 活跃场站数: {len(status)}")
+
+                # 虚拟数据模式：打印各场站 topic 覆盖缺口
+                if ENABLE_MOCK and mock_mgr:
+                    for station_id in service.dispatcher.data_cache:
+                        available = [
+                            t
+                            for t in service.dispatcher.data_cache[station_id]
+                            if service.dispatcher.get_topic_window(station_id, t)
+                        ]
+                        missing = [
+                            t for t in mock_mgr.registered_topics()
+                            if t not in available
+                        ]
+                        if missing:
+                            logging.info(
+                                f"[MockData] {station_id} 仍缺失: {missing}"
+                            )
 
                 # 显示消息积压信息（多消费者模式）
                 if service.consumer._multi_consumer_mode:
@@ -252,16 +327,22 @@ async def main():
                                     f"积压={info.get('lag', 'N/A')} 条"
                                 )
 
-            # 使用多个短暂的 sleep 以提高响应性
             for _ in range(10):
                 await asyncio.sleep(1)
 
     except (KeyboardInterrupt, asyncio.CancelledError) as e:
-        logging.info(f"收到停止信号: {type(e).__name__},开始停机...")
+        logging.info(f"收到停止信号: {type(e).__name__}，开始停机...")
 
     finally:
         logging.info("正在停止服务...")
         await service.stop()
+
+        if mock_task and not mock_task.done():
+            mock_task.cancel()
+            try:
+                await mock_task
+            except asyncio.CancelledError:
+                pass
 
         logging.info("正在停止生产者...")
         await producer.stop()
@@ -277,19 +358,22 @@ if __name__ == "__main__":
     1. 已安装 data_analysis 包
     2. 当前目录下有 config.yaml 配置文件
     3. config.yaml 中正确配置了 module_name 和 Kafka 连接信息
-    """
 
-    # 检查配置文件
+    本地测试（补全缺失 topic）:
+        MOCK_DATA=1 python main.py
+        MOCK_DATA=1 MOCK_STATIONS=1001,1002 python main.py
+
+    强制用虚拟数据覆盖所有 topic（完全脱离 Kafka，纯本地测试）:
+        MOCK_DATA=1 MOCK_FORCE=1 MOCK_STATIONS=1001 python main.py
+    """
     config_file = Path("config.yaml")
     if not config_file.exists():
         print("错误: 找不到 config.yaml 配置文件")
         print("请从 config.yaml.example 复制并修改配置")
         sys.exit(1)
 
-    # 创建并运行事件循环
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-
     try:
         loop.run_until_complete(main())
     except KeyboardInterrupt:

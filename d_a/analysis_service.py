@@ -89,6 +89,7 @@ class AsyncDataAnalysisService(ServiceBase):
         self._callback = None  # 单场站处理回调
         self._result_handler = result_handler  # 单场站结果处理回调
         self._batch_upload_handler = None  # 批次上传回调
+        self._station_init_hook = None  # 场站初始化钩子：worker 启动前调用，用于注入虚拟数据等
 
         # Topic处理器映射：每个topic直接对应一个处理方法
         # 优势：直观、易扩展、无需预定义格式字典
@@ -805,15 +806,27 @@ class AsyncDataAnalysisService(ServiceBase):
         data_event = asyncio.Event()
         self._station_stop_flags[station_id] = stop_flag
         self._station_data_events[station_id] = data_event
-        task = asyncio.create_task(
-            self._station_worker(
+
+        # 若注册了初始化钩子（如虚拟数据注入），在 worker 启动前同步执行
+        # 确保第一次 get_module_input 时数据已完整，彻底消除轮询补全的时间窗口
+        async def _wrapped_worker():
+            if self._station_init_hook is not None:
+                try:
+                    await self._maybe_await(self._station_init_hook, station_id)
+                except Exception as _hook_exc:
+                    logging.warning(
+                        f"[station_init_hook] station={station_id} 执行异常: {_hook_exc}",
+                        exc_info=True,
+                    )
+            await self._station_worker(
                 station_id,
                 self._callback,
                 self._result_handler,
                 stop_flag,
                 data_event,
             )
-        )
+
+        task = asyncio.create_task(_wrapped_worker())
         self._station_tasks[station_id] = task
         # 增加任务计数，累计模型调用次数
         self._task_count += 1

@@ -37,7 +37,7 @@ Repository = "https://github.com/fenwickxie/data_analysis.git"
 Issues = "https://github.com/fenwickxie/data_analysis/issues"
 
 [tool.setuptools]
-packages = ["d_a", "d_a.parsers", "d_a.topic_parsers"]
+packages = ["d_a", "d_a.parsers", "d_a.topic_parsers", "d_a.mock"]
 
 [tool.setuptools.package-data]
 d_a = [
