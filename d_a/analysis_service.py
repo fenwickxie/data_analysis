@@ -769,22 +769,23 @@ class AsyncDataAnalysisService(ServiceBase):
             if not required_topics:
                 return True  # 没有依赖 topic,直接返回 True
 
-            # 检查每个必需的 topic 是否有数据
-            available_count = 0
-            for topic in required_topics:
-                window = self.dispatcher.get_topic_window(station_id, topic)
-                if window:
-                    available_count += 1
-                # 提前返回,避免不必要的计算
-                else:
-                    break
+            # 检查每个必需的 topic 是否有数据（遍历全部，保证日志计数准确）
+            available_count = sum(
+                1 for t in required_topics
+                if self.dispatcher.get_topic_window(station_id, t)
+            )
 
             # 要求所有必需的 topic 都有数据（100% 完整）
             data_ready = available_count == len(required_topics)
 
             if not data_ready:
+                missing = [
+                    t for t in required_topics
+                    if not self.dispatcher.get_topic_window(station_id, t)
+                ]
                 logging.debug(
-                    f"场站 {station_id} 数据未完整: {available_count}/{len(required_topics)} 个topic有数据"
+                    f"场站 {station_id} 数据未完整: {available_count}/{len(required_topics)} 个topic有数据，"
+                    f"缺少: {missing}"
                 )
 
             return data_ready
@@ -887,6 +888,14 @@ class AsyncDataAnalysisService(ServiceBase):
                     self._station_batch_info.pop(station_id, None)
                     batch_id = None  # 重置为 None
 
+                # 限速期间：_batch_upload_handler 已配置但无有效批次（旧批次已过期）
+                # 跳过回调，避免模型推理空转；数据缓存已就绪，等待下次批次创建时再执行
+                if self._batch_upload_handler and not batch_id:
+                    logging.debug(
+                        f"场站 {station_id} 无有效批次（限速中），跳过本次处理"
+                    )
+                    continue
+
                 # 获取解析后的输入数据（只获取指定模块的输入）
                 if self.module_name:
                     module_input = self.dispatcher.get_module_input(
@@ -951,12 +960,11 @@ class AsyncDataAnalysisService(ServiceBase):
                         self._station_batch_info.pop(station_id, None)
                         batch_id = None  # 重置为 None
                 else:
-                    if not batch_id:
-                        logging.warning(f"场站 {station_id} 没有batch_id")
-                    if not self._batch_upload_handler:
-                        logging.warning(
-                            f"场站 {station_id} 没有配置batch_upload_handler"
-                        )
+                    # 到达此处说明 _batch_upload_handler 未配置（非批次模式）
+                    # 或 batch_id 和 handler 均为 None（不应发生，已在上方 continue 拦截）
+                    if self._batch_upload_handler and not batch_id:
+                        # 防御性保留，正常不应触发
+                        logging.debug(f"场站 {station_id} 无有效批次，跳过提交")
 
                 # 保持原有的result_handler逻辑（单场站处理）
                 if result_handler:
