@@ -34,6 +34,7 @@ from .config import (
     MODULE_TO_TOPICS,
     MODULE_OUTPUT_TOPICS,
     OFFSET_COMMIT_CONFIG,
+    UPLOAD_INTERVAL_SECONDS,
 )
 from .dispatcher import DataDispatcher
 from .service_base import ServiceBase
@@ -90,6 +91,11 @@ class AsyncDataAnalysisService(ServiceBase):
         self._result_handler = result_handler  # 单场站结果处理回调
         self._batch_upload_handler = None  # 批次上传回调
         self._station_init_hook = None  # 场站初始化钩子：worker 启动前调用，用于注入虚拟数据等
+
+        # 上传限速：批次上传最小时间间隔（秒），0 表示不限速
+        # 限速在批次创建前检查：间隔内不创建批次，消息照常更新数据缓存但不触发上传
+        self._upload_interval = UPLOAD_INTERVAL_SECONDS
+        self._last_upload_time: float = 0.0  # 上次批次上传完成时间戳
 
         # Topic处理器映射：每个topic直接对应一个处理方法
         # 优势：直观、易扩展、无需预定义格式字典
@@ -1035,17 +1041,26 @@ class AsyncDataAnalysisService(ServiceBase):
                         # parsed_messages.append((msg, None, None))
 
                 # 1. 先创建批次（如果有场站数据且配置了上传回调）
+                # 限速检查：在间隔内跳过批次创建，消息照常更新 dispatcher 缓存
                 if all_station_ids and self._batch_upload_handler:
-                    # 去重场站ID
-                    unique_stations = list(set(all_station_ids))
-                    await self.batch_aggregator.get_or_create_batch(
-                        batch_id=batch_id,
-                        expected_stations=unique_stations,
-                        upload_callback=self._batch_upload_handler,
-                    )
-                    logging.info(
-                        f"创建批次 {batch_id},包含 {len(unique_stations)} 个场站"
-                    )
+                    if self._upload_interval > 0:
+                        elapsed = time.time() - self._last_upload_time
+                        if elapsed < self._upload_interval:
+                            logging.debug(
+                                f"限速中，距上次批次上传 {elapsed:.1f}s"
+                                f"（间隔 {self._upload_interval}s），跳过批次创建"
+                            )
+                            batch_id = None  # 不关联批次，消息处理仍继续（仅更新缓存）
+                    if batch_id is not None:
+                        unique_stations = list(set(all_station_ids))
+                        await self.batch_aggregator.get_or_create_batch(
+                            batch_id=batch_id,
+                            expected_stations=unique_stations,
+                            upload_callback=self._batch_upload_handler,
+                        )
+                        logging.info(
+                            f"创建批次 {batch_id},包含 {len(unique_stations)} 个场站"
+                        )
 
                 # 2. 再处理所有消息（使用缓存的解析结果）
                 for msg, value, station_data_list in parsed_messages:
@@ -1101,7 +1116,12 @@ class AsyncDataAnalysisService(ServiceBase):
         if result_handler is not None:
             self._result_handler = result_handler
         if batch_upload_handler is not None:
-            self._batch_upload_handler = batch_upload_handler
+            # 包装 upload_handler：批次上传完成后更新服务级限速时间戳
+            _user_handler = batch_upload_handler
+            async def _wrapped_upload_handler(batch_id, results_list, _svc=self):
+                await _user_handler(batch_id, results_list)
+                _svc._last_upload_time = time.time()
+            self._batch_upload_handler = _wrapped_upload_handler
         self._main_task = asyncio.create_task(self._main_loop())
 
     async def stop(self):

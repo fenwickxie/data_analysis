@@ -130,6 +130,9 @@ MODULE_OUTPUT_TOPICS = _config['module_output']['topics']
 MODULE_OUTPUT_WINDOW_SIZE = _config['module_output']['window_size']
 MODULE_NAME = _config.get('module_name', 'load_prediction')  # 默认为load_prediction
 
+# 上传限速配置：同一场站结果上传最小时间间隔（秒），0 表示不限速
+UPLOAD_INTERVAL_SECONDS = float(_config.get('upload_interval_seconds', 0))
+
 # 日志配置
 _logging_config = _config.get('logging', {})
 LOGGING_CONFIG = {

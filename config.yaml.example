@@ -38,6 +38,14 @@ kafka:
     key_deserializer: "org.apache.kafka.common.serialization.StringDeserializer"
     value_deserializer: "org.apache.kafka.common.serialization.StringDeserializer"
 
+# 上传限速配置
+# upload_interval_seconds: 场站结果上传最小时间间隔（秒）
+# - 0 或不设置：不限速，每次数据触发都执行回调并上传（原行为）
+# - > 0：同一场站在间隔内的触发将被丢弃，仅在间隔到期后上传最新结果
+# 适用场景：多 topic 驱动导致高频重复计算时，限制上传频率节省计算资源
+# 示例：60 表示每个场站最多每分钟上传一次
+upload_interval_seconds: 0
+
 # Offset管理配置
 offset_commit:
   commit_interval_seconds: 5.0 # 定时提交间隔（秒）
