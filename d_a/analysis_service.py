@@ -95,7 +95,15 @@ class AsyncDataAnalysisService(ServiceBase):
         # 上传限速：批次上传最小时间间隔（秒），0 表示不限速
         # 限速在批次创建前检查：间隔内不创建批次，消息照常更新数据缓存但不触发上传
         self._upload_interval = UPLOAD_INTERVAL_SECONDS
-        self._last_upload_time: float = 0.0  # 上次批次上传完成时间戳
+        self._last_upload_time: float = 0.0     # 上次批次上传完成时间戳（time.monotonic()）
+        # _upload_allowed: 计时器 set 后允许创建批次，批次创建时 clear，计时结束后再次 set
+        # 不限速时始终为 set；限速时由 _upload_timer_task 精确控制
+        self._upload_allowed: asyncio.Event = asyncio.Event()
+        if self._upload_interval <= 0:
+            self._upload_allowed.set()  # 不限速：永远允许
+        # _upload_triggered: 上传完成后由 wrapped handler set，通知计时器开始计时
+        self._upload_triggered: asyncio.Event = asyncio.Event()
+        self._timer_task: asyncio.Task | None = None  # 独立计时任务
 
         # Topic处理器映射：每个topic直接对应一个处理方法
         # 优势：直观、易扩展、无需预定义格式字典
@@ -978,6 +986,57 @@ class AsyncDataAnalysisService(ServiceBase):
                 handle_error(exc, context=f"场站任务 station_id={station_id}")
                 await asyncio.sleep(1)  # 错误后短暂延迟
 
+    async def _upload_timer_task(self):
+        """
+        精确上传计时任务（仅限速模式下运行）。
+
+        工作流程：
+          1. 立即 set _upload_allowed，允许第一次上传（T=0 无需等待）
+          2. 等待 _upload_triggered（由 wrapped handler 在上传完成后 set）
+          3. 从上传完成时刻起，精确 sleep _upload_interval 秒
+          4. set _upload_allowed，允许下一次批次创建；回到步骤 2
+
+        精度：asyncio.sleep 误差约 10~50ms，远优于原方案的 0~1500ms。
+        """
+        if self._upload_interval <= 0:
+            return  # 不限速，直接退出，_upload_allowed 已在 __init__ 中永远 set
+
+        # 首次：立即允许第一批上传
+        self._upload_allowed.set()
+        logging.debug("[UploadTimer] 启动，首次上传立即允许")
+
+        while not self._stop_event.is_set():
+            # 等待一次上传完成信号（_wrapped_upload_handler 触发）
+            self._upload_triggered.clear()
+            try:
+                await asyncio.wait_for(self._upload_triggered.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue  # 无上传发生，继续等待
+            except asyncio.CancelledError:
+                break
+
+            if self._stop_event.is_set():
+                break
+
+            # 从上次上传完成时刻起，精确计算剩余等待时间
+            remaining = self._upload_interval - (time.monotonic() - self._last_upload_time)
+            if remaining > 0:
+                logging.debug(
+                    f"[UploadTimer] 上传完成，等待 {remaining:.2f}s 后开放下次上传"
+                )
+                try:
+                    await asyncio.sleep(remaining)
+                except asyncio.CancelledError:
+                    break
+
+            if self._stop_event.is_set():
+                break
+
+            self._upload_allowed.set()
+            logging.debug(
+                f"[UploadTimer] 计时到期（间隔 {self._upload_interval}s），允许下次批次创建"
+            )
+
     async def _main_loop(self):
         """主循环,负责消费Kafka消息并分发处理,管理批次,提交offset等"""
         try:
@@ -1049,16 +1108,17 @@ class AsyncDataAnalysisService(ServiceBase):
                         # parsed_messages.append((msg, None, None))
 
                 # 1. 先创建批次（如果有场站数据且配置了上传回调）
-                # 限速检查：在间隔内跳过批次创建，消息照常更新 dispatcher 缓存
+                # 限速检查：_upload_allowed 未 set 时跳过批次创建，消息照常更新 dispatcher 缓存
                 if all_station_ids and self._batch_upload_handler:
-                    if self._upload_interval > 0:
-                        elapsed = time.time() - self._last_upload_time
-                        if elapsed < self._upload_interval:
-                            logging.debug(
-                                f"限速中，距上次批次上传 {elapsed:.1f}s"
-                                f"（间隔 {self._upload_interval}s），跳过批次创建"
-                            )
-                            batch_id = None  # 不关联批次，消息处理仍继续（仅更新缓存）
+                    if not self._upload_allowed.is_set():
+                        logging.debug(
+                            f"限速中（已等待 {time.monotonic() - self._last_upload_time:.1f}s"
+                            f" / {self._upload_interval}s），跳过批次创建"
+                        )
+                        batch_id = None  # 不关联批次，消息处理仍继续（仅更新缓存）
+                    else:
+                        # 允许上传：立即 clear，防止同一轮重复创建多个批次
+                        self._upload_allowed.clear()
                     if batch_id is not None:
                         unique_stations = list(set(all_station_ids))
                         await self.batch_aggregator.get_or_create_batch(
@@ -1124,16 +1184,25 @@ class AsyncDataAnalysisService(ServiceBase):
         if result_handler is not None:
             self._result_handler = result_handler
         if batch_upload_handler is not None:
-            # 包装 upload_handler：批次上传完成后更新服务级限速时间戳
+            # 包装 upload_handler：上传完成后记录时间并通知计时器开始倒计时
             _user_handler = batch_upload_handler
             async def _wrapped_upload_handler(batch_id, results_list, _svc=self):
                 await _user_handler(batch_id, results_list)
-                _svc._last_upload_time = time.time()
+                _svc._last_upload_time = time.monotonic()  # 记录上传完成时刻
+                _svc._upload_triggered.set()               # 通知计时器开始计时
             self._batch_upload_handler = _wrapped_upload_handler
+        # 启动独立计时任务（不限速时内部立即返回，无额外开销）
+        self._timer_task = asyncio.create_task(self._upload_timer_task())
         self._main_task = asyncio.create_task(self._main_loop())
 
     async def stop(self):
         self._stop_event.set()
+        if self._timer_task and not self._timer_task.done():
+            self._timer_task.cancel()
+            try:
+                await self._timer_task
+            except asyncio.CancelledError:
+                pass
         if self._main_task:
             await self._main_task
 
