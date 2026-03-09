@@ -221,14 +221,16 @@ class SequenceMockProvider(MockProvider):
     def get_data(self, station_id: str, topic: str) -> Any:
         if not self._sequence:
             return {}
-        item = copy.deepcopy(self._sequence[self._index])
-        rendered = self._render(item, station_id)
+        item = self._sequence[self._index]
         # 前进索引
         if self._loop:
             self._index = (self._index + 1) % len(self._sequence)
         else:
             self._index = min(self._index + 1, len(self._sequence) - 1)
-        return rendered
+        # 如果序列元素本身是 MockProvider，委托其 get_data
+        if isinstance(item, MockProvider):
+            return item.get_data(station_id, topic)
+        return self._render(copy.deepcopy(item), station_id)
 
     def reset(self):
         """重置序列到起点"""

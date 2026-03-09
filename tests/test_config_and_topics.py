@@ -54,26 +54,24 @@ def test_config_parser_window_merges_series():
         {
             "stationId": "station001",
             "FeeNo": "fee-1",
-            "gridPrice": 0.5,
-            "serviceFee": 0.2,
+            "ebbElectricFee": 0.5,
+            "ebbServerFee": 0.2,
             "startTime": "00:00",
             "endTime": "06:00",
-            "periodType": "valley",
         },
         {
             "stationId": "station001",
             "FeeNo": "fee-2",
-            "gridPrice": 0.8,
-            "serviceFee": 0.3,
+            "ebbElectricFee": 0.8,
+            "ebbServerFee": 0.3,
             "startTime": "06:00",
             "endTime": "12:00",
-            "periodType": "flat",
         },
     ]
 
     parsed = parser.parse_window(window)
     assert parsed is not None
-    assert parsed["gridPrice"] == [0.5, 0.8]
+    assert parsed["ebbElectricFee"] == [0.5, 0.8]
     assert parsed["FeeNo"] == ["fee-1", "fee-2"]
 
 
