@@ -1,25 +1,21 @@
 # API 文档
 
-> **文档版本**：v1.2  
-> **更新日期**：2025-11-23  
-> **对应代码版本**：data_analysis v1.1 (branch: feature-one)
+> **文档版本**：v2.0  
+> **更新日期**：2026-03-09  
+> **对应代码版本**：data_analysis v2.0.0 (branch: develop)
 
 本文档详细说明data_analysis模块的公共API、回调函数规范和配置参数。
 
 **修订说明**：
+- v2.0 (2026-03-09): 全面对齐 v2.0.0 代码实现
+    - `DataAnalysisService.__init__` 移除 `output_topic_prefix` 参数
+    - `AsyncDataAnalysisService.__init__` 移除 `output_topic_prefix`，新增 `offset_commit_config`
+    - `DataDispatcher.__init__` 新增 `enable_data_expiration` 参数
+    - `DataDispatcher.update_topic_data` 返回类型由 `None` 改为 `bool`，新增 `timestamp` 参数
+    - 配置相关描述全部更新为 YAML 格式（`config.yaml`）
+    - `__version__` 修正为 2.0.0；新增 `ServiceBase` 说明
 - v1.2 (2025-11-23): 融合同步/异步批次上传、数据可用性、全局数据缓存与多消费者诊断文档
-    - 补充 `batch_upload_handler` 批次聚合API与 `BatchResultAggregator` 数据流
-    - 描述 `_data_quality` 元信息、全局数据缓存和站点初始化顺序
-    - 汇总多消费者模式、空拉取诊断与 offset 越界规避最佳实践
-    - 更新配置章节，突出 `OFFSET_COMMIT_CONFIG` 与 group_id 管理策略
-    - 整理Kafka参数白名单与可选调优项
 - v1.1 (2025-11-07): 更新以匹配实际代码实现
-    - 添加 `result_handler` 参数到服务构造函数
-    - 修正方法名：`get_all_outputs` → `get_all_inputs`
-    - 移除未实现的 `set_padding_strategy` 方法
-    - 更新配置参数说明以匹配 config.py
-    - 修正字段命名规范（camelCase）
-    - 完善Kafka客户端参数白名单说明
 
 ## 目录
 
@@ -41,17 +37,15 @@ DataAnalysisService(
     topics=None,
     kafka_config=None,
     data_expire_seconds=600,
-    output_topic_prefix="MODULE-OUTPUT-",
     result_handler=None
 )
 ```
 
 **参数**:
-- `module_name` (str, optional): 业务模块名称，用于标识当前处理模块。默认为None。
-- `topics` (list, optional): 需要消费的topic列表，默认为配置文件中所有topic。
-- `kafka_config` (dict, optional): Kafka连接配置，默认为config.KAFKA_CONFIG。
+- `module_name` (str, optional): 业务模块名称，用于标识当前处理模块。默认为None（自动从config.yaml的`module_name`字段读取）。
+- `topics` (list, optional): 需要消费的topic列表，默认由`module_name`和配置自动推导。
+- `kafka_config` (dict, optional): Kafka连接配置，默认为config.yaml中的`kafka`节。
 - `data_expire_seconds` (int, optional): 数据过期时间(秒)，默认为600。
-- `output_topic_prefix` (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"。
 - `result_handler` (callable, optional): 结果处理回调函数 `(station_id, result) -> None`，在结果上传Kafka后调用。默认为None。
 
 **异常**:
@@ -118,18 +112,18 @@ AsyncDataAnalysisService(
     topics=None,
     kafka_config=None,
     data_expire_seconds=600,
-    output_topic_prefix="MODULE-OUTPUT-",
-    result_handler=None
+    result_handler=None,
+    offset_commit_config=None
 )
 ```
 
 **参数**:
-- `module_name` (str, optional): 业务模块名称，用于标识当前处理模块。默认为None。
-- `topics` (list, optional): 需要消费的topic列表，默认为配置文件中所有topic。
-- `kafka_config` (dict, optional): Kafka连接配置，默认为config.KAFKA_CONFIG。
+- `module_name` (str, optional): 业务模块名称，默认从 config.yaml 的 `module_name` 字段读取。
+- `topics` (list, optional): 需要消费的 topic 列表，默认由 `module_name` 和配置自动推导。
+- `kafka_config` (dict, optional): Kafka连接配置，默认为config.yaml中的`kafka`节。
 - `data_expire_seconds` (int, optional): 数据过期时间(秒)，默认为600。
-- `output_topic_prefix` (str, optional): 输出topic前缀，默认为"MODULE-OUTPUT-"。
-- `result_handler` (callable, optional): 结果处理回调函数 `async (station_id, result) -> None`，在结果上传Kafka后调用。可以是同步或异步函数。默认为None。
+- `result_handler` (callable, optional): 结果处理回调 `async (station_id, result) -> None`，可为同步或异步函数。默认为None。
+- `offset_commit_config` (dict, optional): 手动Offset提交配置，默认为config.yaml中的`offset_commit`节。
 
 **异常**:
 - `KafkaConnectionError`: 当Kafka连接失败时抛出。
@@ -199,7 +193,7 @@ inputs = await service.get_all_inputs("station001")
 
 异步服务内置 `BatchResultAggregator`，用于将同一批消息里多个场站的模型输出聚合成一次上传：
 
-- **启用方式**：调用 `AsyncDataAnalysisService.start(..., batch_upload_handler=my_handler)`。当 `_batch_upload_handler` 存在且批次包含多个场站时，服务会从 `SCHEDULE-STATION-REALTIME-DATA` 的最新 `sendTime` 构造 `batch_id`（格式示例：`SCHEDULE-STATION-REALTIME-DATA_1699999200`），并记录本批所有场站 ID。
+- **启用方式**：调用 `AsyncDataAnalysisService.start(..., batch_upload_handler=my_handler)`。当 `_batch_upload_handler` 存在时，服务为每次触发生成 `batch_id`，格式为 `f"batch_{int(time.time()*1000)}_{id(batch)}"` （时间戳毫秒 + 对象地址，保证唯一性），并记录本批所有场站 ID。
 - **Collector 生命周期**：`BatchResultAggregator` 会为每个 `batch_id` 创建 `BatchCollector`，跟踪 `expected_stations`、到齐进度以及 `batch_timeout`（默认 5 秒）。全部结果到齐或超时都会触发 `_batch_upload_handler(batch_id, results_list)`。
 - **回调契约**：`results_list` 仅包含返回非 `None` 的场站结果，且系统会自动注入 `station_id` 字段；若某场站回调返回 `None` 或报错，它不会出现在列表中。`batch_upload_handler` 可为同步或异步函数。
 - **降级策略**：无法解析批次（例如其他 topic 或缺少 `sendTime`）时自动回退到旧逻辑，仅调用 `result_handler`；未提供 `_batch_upload_handler` 时行为与 v1.1 相同。
@@ -212,13 +206,13 @@ inputs = await service.get_all_inputs("station001")
 #### 初始化
 
 ```python
-DataDispatcher(data_expire_seconds=600)
+DataDispatcher(data_expire_seconds=600, enable_data_expiration=True)
 ```
 
 **参数**:
 - `data_expire_seconds` (int, optional): 数据过期时间(秒)，默认为600。
 
-#### update_topic_data(station_id, topic, raw_data)
+#### update_topic_data(station_id, topic, raw_data, timestamp=None)
 
 更新指定场站、topic的数据窗口。
 
@@ -226,8 +220,9 @@ DataDispatcher(data_expire_seconds=600)
 - `station_id` (str): 场站ID。
 - `topic` (str): topic名称。
 - `raw_data` (dict): 原始数据。
+- `timestamp` (float, optional): 消息时间戳（秒，来自Kafka消息的 `timestamp/1000`），`None` 时自动取 `time.time()`。
 
-**返回值**: None
+**返回值**: `bool` — `True` 表示应触发数据就绪事件；`False` 表示同一秒内订单类 topic 正在聚合，暂不触发
 
 #### get_topic_window(station_id, topic)
 
@@ -444,62 +439,45 @@ async def my_callback(station_id, module_input):
 
 ## 配置参数说明
 
-### Kafka配置 (KAFKA_CONFIG)
+### Kafka配置 (kafka in config.yaml)
 
-#### 嵌套格式（推荐）
+> **v2.0变更**：所有配置通过 `config.yaml` 管理，不再直接编辑 `config.py`。
 
-```python
-KAFKA_CONFIG = {
-    'consumer': {
-        'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
-        'group_id': 'data_analysis_group',        # 消费者组ID
-        'auto_offset_reset': 'latest',            # 消费策略：latest/earliest
-        'enable_auto_commit': True,               # 是否自动提交offset
-        'max_poll_records': 500,                  # 单次拉取最大记录数
-        'session_timeout_ms': 30000,              # 会话超时时间(毫秒)
-    },
-    'producer': {
-        'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
-        'acks': 'all',                            # 消息确认模式：all/1/0
-        'retries': 3,                             # 发送失败重试次数
-        'max_in_flight_requests_per_connection': 5,  # 单连接未确认请求数
-        'compression_type': 'gzip',               # 压缩类型：gzip/snappy/lz4
-    }
-}
+#### 嵌套格式（config.yaml）
+
+```yaml
+kafka:
+  bootstrap_servers:
+    - localhost:9092
+  consumer:
+    group_id: data_analysis_group
+    auto_offset_reset: latest     # latest / earliest
+    enable_auto_commit: false     # 推荐 false，由 OffsetManager 手动提交
+    max_poll_records: 500
+    session_timeout_ms: 30000
+    multi_consumer_mode: false    # true = 每个topic独立consumer
+  producer:
+    acks: all
+    retries: 3
+    compression_type: gzip
 ```
 
-#### 扁平格式（向后兼容）
-
-```python
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['localhost:9092'],  # Kafka服务器地址列表
-    'group_id': 'data_analysis_group',        # 消费者组ID
-    'auto_offset_reset': 'latest',            # 消费策略：latest/earliest
-    'enable_auto_commit': True,               # 是否自动提交offset
-}
-```
+> 也可通过代码参数 `kafka_config=` 传入同结构的 Python 字典（同时支持嵌套和扁平两种格式），优先级高于 YAML。
 
 **参数说明**:
 
-**消费者配置 (consumer)**:
-- `bootstrap_servers`: Kafka集群地址列表，格式为['host1:port1', 'host2:port2']
-- `group_id`: 消费者组ID，用于标识消费者组
-- `auto_offset_reset`: 消费策略，'latest'从最新数据开始，'earliest'从最早数据开始
-- `enable_auto_commit`: 是否自动提交消费offset
-- `max_poll_records`: 单次poll拉取的最大记录数，默认500
-- `session_timeout_ms`: 会话超时时间，默认30000毫秒
+**消费者（consumer）**:
+- `bootstrap_servers`: Kafka集群地址列表（也可放在顶层共享）
+- `group_id`: 消费者组ID
+- `auto_offset_reset`: 消费策略，`latest` / `earliest`
+- `enable_auto_commit`: 推荐 `false`，由 `OffsetManager` 负责手动提交
+- `max_poll_records`: 单次 poll 拉取最大记录数
+- `multi_consumer_mode`: `true` 时每个 topic 创建独立 consumer，缓解热点 topic 占满配额
 
-**生产者配置 (producer)**:
-- `bootstrap_servers`: Kafka集群地址列表
-- `acks`: 消息确认模式，'all'等待所有副本确认（最安全），'1'等待leader确认，'0'不等待确认
-- `retries`: 发送失败后的重试次数，默认3
-- `max_in_flight_requests_per_connection`: 单连接未确认请求数，默认5
-- `compression_type`: 消息压缩类型，可选'gzip'/'snappy'/'lz4'/'none'
-
-**格式说明**:
-- 优先使用嵌套格式，可以为消费者和生产者分别配置参数
-- 扁平格式主要用于向后兼容，系统会自动适配
-- 嵌套格式下，consumer和producer配置互不影响
+**生产者（producer）**:
+- `acks`: 消息确认模式，`all`/`1`/`0`
+- `retries`: 发送失败重试次数
+- `compression_type`: 压缩方式 `gzip`/`snappy`/`lz4`/`none`
 
 #### 多消费者模式 (multi_consumer_mode)
 
@@ -557,21 +535,29 @@ TOPIC_DETAIL = {
 
 **参数说明**:
 - `fields`: 该topic包含的字段列表（注意：实际数据使用 camelCase 命名，如 `stationId` 而非 `station_id`）
-- `frequency`: 数据推送频率描述
+- `frequency`: 每小时推送次数（整数）
 - `modules`: 需要消费此数据的业务模块列表
-- `window_size`: 数据窗口大小，单位为数据点数量。计算示例：
-  - 高频数据(15秒)的7天窗口：`7 * 24 * 60 * 4 = 40320` 个数据点
-  - 低频配置数据：`1` 个数据点即可
+- `window_size`: 数据窗口大小，单位为数据点数量
 
 ### 模块依赖配置 (MODULE_DEPENDENCIES)
 
 ```python
-MODULE_DEPENDENCIES = {
-    'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
-    'station_guidance': ['load_prediction', 'evaluation_model'],
-    'thermal_management': ['load_prediction', 'operation_optimization'],
-    'operation_optimization': ['load_prediction'],
-}
+### 模块依赖配置 (module_dependencies in config.yaml)
+
+```yaml
+module_dependencies:
+  electricity_price:
+    - pv_prediction
+    - evaluation_model
+    - SOH_model
+  station_guidance:
+    - load_prediction
+    - evaluation_model
+  thermal_management:
+    - load_prediction
+    - operation_optimization
+  operation_optimization:
+    - load_prediction
 ```
 
 **参数说明**:
@@ -585,15 +571,14 @@ MODULE_DEPENDENCIES = {
    - 默认值: 600 (10分钟)
    - 说明: 数据在内存中保存的时间，超时后自动清理
 
-2. **输出Topic前缀 (output_topic_prefix)**:
-   - 类型: str
-   - 默认值: "MODULE-OUTPUT-"
-   - 说明: 模块输出结果的topic前缀，完整topic为"前缀+模块名大写"
+2. **上传限速 (upload_interval_seconds)**:
+   - 配置于 `config.yaml` 的 `upload_interval_seconds` 字段
+   - 类型: float，默认值: 0（不限速）
+   - 说明: 连续两次模型触发之间的最短间隔；设为正数可避免数据洪峰时对算法服务的冲击
 
 3. **窗口补全策略**:
-   - **注意**：当前版本（v1.1）未实现窗口补全策略功能
-   - 窗口不足时自动填充 None
-   - 未来版本可能支持：'zero'（补零）、'linear'（线性插值）、'forward'（前向填充）等策略
+   - 子类可重写 `ParserBase.parse_window()` 实现自定义插值逻辑
+   - `DataDispatcher.set_padding_strategy()` 接口保留，当前由各 parser 自行实现补全
 
 ### 性能相关配置
 
@@ -603,5 +588,5 @@ MODULE_DEPENDENCIES = {
    - 说明: 同步服务中线程池的最大线程数，应根据实际场站规模调整
 
 2. **Kafka批处理大小**:
-   - 配置在Kafka客户端中
+   - 配置在 `config.yaml` 的 `kafka.consumer.max_poll_records`
    - 建议根据数据量调整，平衡吞吐量和延迟

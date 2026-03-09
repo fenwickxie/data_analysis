@@ -1,6 +1,6 @@
 # 算法设计说明书（Data Analysis Module）
 
-更新时间：2025-11-23  |  版本：v1.2
+更新时间：2026-03-09  |  版本：v2.0
 
 ---
 
@@ -10,7 +10,8 @@
 |------|------|----------|--------|
 | v1.0 | 2025-10-23 | 初始版本 | - |
 | v1.1 | 2025-11-07 | 根据实际代码全面修订，包括：<br/>1. 更新API方法名称（get_module_input → get_all_inputs）<br/>2. 补充result_handler参数说明<br/>3. 详细说明消息解码流程（bytes → UTF-8 → JSON）<br/>4. 更新Kafka客户端实现细节（getmany批量处理）<br/>5. 补充动态添加/移除场站功能<br/>6. 更新Topic配置字段名（匹配实际驼峰命名）<br/>7. 扩展错误处理和恢复策略说明<br/>8. 补充并发模型和线程安全详情<br/>9. 移除未实现的补全策略（当前版本不支持）<br/>10. 更新配置示例为实际生产配置 | -|
-| v1.2 | 2025-11-23 | 融合批次结果聚合、数据质量元信息、全局数据缓存与多消费者/Offset修复方案：<br/>1. 描述`BatchResultAggregator`与`batch_upload_handler`契约<br/>2. 记录 `_data_quality` 元信息和使用示例<br/>3. 补充 `_global_data_cache` 工作流，避免全局topic丢失<br/>4. 文档化 `OffsetManager`、`OFFSET_COMMIT_CONFIG` 与提交策略<br/>5. 扩展 Kafka 多消费者模式、独立 `group_id` 与空拉取诊断指南 | - |
+| v1.2 | 2025-11-23 | 融合批次结果聚合、数据质量元信息、全局数据缓存与多消费者/Offset修复方案 | - |
+| v2.0 | 2026-03-09 | 全面对齐 v2.0.0 代码实现：<br/>1. 配置系统迁移至 YAML（`config.yaml`）<br/>2. 新增 `SCHEDULE-ENVIRONMENT-WEATHER`、`SCHEDULE-DEVICE-PV` 共13个topic<br/>3. 新增 `ServiceBase` 公共基类说明<br/>4. `AsyncDataAnalysisService.__init__` 移除 `output_topic_prefix`，新增 `offset_commit_config`<br/>5. `DataDispatcher.__init__` 新增 `enable_data_expiration` 参数<br/>6. `update_topic_data` 返回 `bool`，新增 `timestamp` 参数<br/>7. `batch_id` 生成策略从 sendTime 改为毫秒时间戳+对象id<br/>8. 新增 `_station_init_hook`、`upload_interval_seconds` 说明<br/>9. 新增 `ConfigBasedParser` 说明 | - |
 
 ---
 
@@ -122,13 +123,54 @@ sequenceDiagram
 
 <a id="sec-2-3"></a>
 #### 快速导航（2.3 主要模块/类）
+- [2.3.0 ServiceBase（服务公共基类）](#sec-2-3-0)
 - [2.3.1 DataDispatcher](#sec-2-3-1)
 - [2.3.2 DataAnalysisService（同步）](#sec-2-3-2)
 - [2.3.3 AsyncDataAnalysisService（异步）](#sec-2-3-3)
 - [2.3.4 Kafka 客户端（同步/异步）](#sec-2-3-4)
 - [2.3.5 异常类与回调契约](#sec-2-3-5)
+- [2.3.6 ParserBase / ConfigBasedParser（解析器基类）](#sec-2-3-6)
 
 本节合并了完整的接口与参数说明，涵盖构造参数、方法、返回与异常，来源于项目源代码解析与API文档校对。
+
+<a id="sec-2-3-0"></a>
+#### 2.3.0 ServiceBase（服务公共基类）
+
+`ServiceBase`（`d_a/service_base.py`）是 `DataAnalysisService` 与 `AsyncDataAnalysisService` 的公共基类，负责提取两者共享的初始化逻辑。
+
+**构造**：
+```python
+ServiceBase(
+    module_name: str | None,
+    topics: list[str] | None,
+    kafka_config: dict | None,
+    data_expire_seconds: int,
+)
+```
+
+> 注意：`ServiceBase` 不直接实例化，子类在 `__init__` 中调用 `super().__init__(...)`。
+
+**参数说明**：
+- `module_name`：业务模块名称，用于自动解析订阅 topic 列表
+- `topics`：显式指定的 topic 列表；若提供则忽略 `module_name` 推断
+- `kafka_config`：Kafka 连接配置字典；为 `None` 时从 `config.yaml` 的 `kafka` 节自动加载
+- `data_expire_seconds`：数据过期时间（秒），传递给内部 `DataDispatcher`
+
+**关键属性**：
+- `module_name`：模块名称
+- `topics`：最终订阅的 topic 列表（经 `_resolve_topics` 解析后）
+- `kafka_config`：Kafka 配置
+- `dispatcher`：`DataDispatcher` 实例，负责多场站数据窗口管理
+- `_task_count`：任务计数器（子类场站并发使用）
+
+**方法**：
+
+1. **_resolve_topics**(module_name, topics) -> list[str] — `@staticmethod`
+   - 解析最终订阅的 topic 列表，优先级：
+     1. `topics` 不为 `None` → 直接使用
+     2. `module_name` 有值 → 查 `MODULE_TO_TOPICS[module_name]`（去重保序）
+     3. 两者均为 `None` → 订阅所有 topic（仅调试用，打印警告）
+   - 若 `module_name` 未在 `MODULE_TO_TOPICS` 中配置，抛出 `ValueError`
 
 <a id="sec-2-3-1"></a>
 #### 2.3.1 DataDispatcher（数据分发与依赖处理核心）
@@ -241,7 +283,7 @@ DataAnalysisService(
   - 若提供，直接使用该列表
   - 若未提供但指定module_name，使用MODULE_TO_TOPICS[module_name]
   - 否则使用所有已配置的topic
-- `kafka_config`：Kafka连接配置，默认使用config.KAFKA_CONFIG
+- `kafka_config`：Kafka连接配置，默认从 `config.yaml` 的 `kafka` 节自动加载
 - `data_expire_seconds`：数据过期时间（秒），默认600
 - `result_handler`：结果处理函数，签名为`(station_id, module_input, result) -> Any`
 
@@ -278,8 +320,8 @@ DataAnalysisService(
    - 向后兼容
 
 5. **reload_config**() -> None
-   - 重新加载config.py模块
-   - 更新全局配置（KAFKA_CONFIG, TOPIC_TO_MODULES, MODULE_TO_TOPICS）
+   - 重新加载 config.yaml 配置文件
+   - 更新全局配置（kafka、topic_detail、module_dependencies 等节）
    - 调用dispatcher.reload_config()同步更新
    - 记录日志
 
@@ -327,10 +369,11 @@ AsyncDataAnalysisService(
     kafka_config: dict | None = None,
     data_expire_seconds: int = 600,
     result_handler: callable | None = None,
+    offset_commit_config: dict | None = None,  # v2.0 新增
 )
 ```
 
-**参数说明**：与DataAnalysisService相同，但内部以asyncio实现
+**参数说明**：与DataAnalysisService相同，另有 `offset_commit_config`（手动提交配置，默认从 `config.yaml` 读取）；内部以 asyncio 实现
 
 **关键属性**：
 - `consumer`：AsyncKafkaConsumerClient实例，异步消费者
@@ -575,30 +618,23 @@ acks, compression_type, linger_ms, security_protocol, sasl_mechanism,
 sasl_plain_username, sasl_plain_password
 ```
 
-**配置示例**：
-```python
-# 嵌套配置（推荐）
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['10.8.4.40:35888'],
-    'consumer': {
-        'group_id': 'data_analysis',
-        'auto_offset_reset': 'latest',
-        'enable_auto_commit': False,
-        'max_poll_records': 3000,
-    },
-    'producer': {
-        'acks': 'all',
-        'compression_type': 'gzip',
-    }
-}
-
-# 扁平配置（向后兼容）
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['10.8.4.40:35888'],
-    'group_id': 'data_analysis',
-    'auto_offset_reset': 'latest',
-}
+**配置示例**（`config.yaml`，v2.0 起配置通过YAML管理）：
+```yaml
+kafka:
+  bootstrap_servers:
+    - 10.8.4.40:35888
+  consumer:
+    group_id: data_analysis
+    auto_offset_reset: latest
+    enable_auto_commit: false
+    max_poll_records: 3000
+    multi_consumer_mode: true
+  producer:
+    acks: all
+    compression_type: gzip
 ```
+
+> 也可通过代码参数 `kafka_config=` 传入等效 Python 字典（支持嵌套/扁平两种格式），优先级高于 YAML。
 
 ###### 多消费者模式（multi_consumer_mode）
 
@@ -727,7 +763,75 @@ result_handler(station_id, module_input, result)
 - 回调函数应避免共享可变状态，或使用适当的同步机制
 
 <a id="sec-2-3-6"></a>
-#### 2.3.6 BatchResultAggregator（批次结果聚合器）
+#### 2.3.6 ParserBase / ConfigBasedParser（解析器基类）
+
+**位置**：`d_a/parser_base.py`
+
+该文件定义了所有解析器的基类层次：
+
+```
+ParserBase（抽象基类）
+└── ConfigBasedParser（通用配置驱动解析器）
+    └── CarOrderParser, CarPriceParser, DeviceGunParser, ...（各 topic 解析器）
+```
+
+##### ParserBase（抽象基类）
+
+```python
+class ParserBase(ABC):
+    @abstractmethod
+    def parse(self, raw_data: dict) -> dict | None: ...
+    def parse_window(self, window_data: list) -> dict: ...
+```
+
+- **`parse(raw_data)`**：抽象方法，子类必须实现。模块层解析器用于整合加工，Topic 层解析器用于字段提取。
+- **`parse_window(window_data)`**：默认实现为对每条数据调用 `parse()` 并按字段合并为列表，返回 `{field: [v1, v2, ...]}`。子类可复写实现枪号对齐、插値等自定义逻辑。
+
+##### ConfigBasedParser（配置驱动通用解析器）
+
+**构造**：
+```python
+ConfigBasedParser(topic_name: str, config_module=None)
+```
+
+**参数**：
+- `topic_name`：Topic 名称，对应 `TOPIC_DETAIL` 中的键（如 `"SCHEDULE-STATION-PARAM"`）
+- `config_module`：配置模块，默认 `None`（自动导入 `d_a.config`）
+
+当 `TOPIC_DETAIL[topic_name]` 中未配置 `fields` 或列表为空时，构造器抛出 `ValueError`。
+
+**方法**：
+
+1. **parse**(raw_data: dict) -> dict | None
+   - 按 `TOPIC_DETAIL[topic_name]['fields']` 配置的字段列表从原始消息自动提取字段
+   - 字段名为 camelCase，与 Kafka 消息一致
+   - `raw_data` 为空时返回 `None`
+
+2. **parse_window**(window_data: list) -> dict | None
+   - `window_size=1`：直接返回最新一条数据的 `parse()` 结果
+   - `window_size>1`：调用基类默认实现，将各字段合并为列表
+   - 窗口为空时返回 `None`
+
+**使用示例**：
+```python
+from d_a.parser_base import ConfigBasedParser
+
+# 直接实例化使用
+parser = ConfigBasedParser("SCHEDULE-STATION-PARAM")
+result = parser.parse({"stationId": "s1", "lat": 30.5, "lng": 120.3})
+# 返回: {"stationId": "s1", "lat": 30.5, "lng": 120.3, ...}
+
+# 继承实现自定义解析器
+class MyTopicParser(ConfigBasedParser):
+    def parse_window(self, window_data):
+        # 自定义窗口逻辑（枚号对齐、插値等）
+        ...
+```
+
+**插件扩展**：新增 Topic 解析器时，若无需自定义逻辑，可直接继承 `ConfigBasedParser`（仅需在 `config.yaml` 中配置 `fields`），无需任何额外代码。
+
+<a id="sec-2-3-7"></a>
+#### 2.3.7 BatchResultAggregator（批次结果聚合器）
 
 **位置**：`d_a/batch_result_aggregator.py`
 
@@ -758,14 +862,14 @@ async def _do_upload():
 **回调契约**：
 - `AsyncDataAnalysisService.start(..., batch_upload_handler=my_handler)` 启用批次聚合；若未提供 handler，系统保持旧的逐场站 `result_handler` 行为。
 - `batch_upload_handler` 接收 `(batch_id, results_list)`，其中 `results_list` 仅包含非 `None` 的场站结果；建议业务在 callback 返回值中显式注入 `station_id` 以便组装上传载荷。
-- 批次 ID 由服务根据当前批内消息的时间戳或 `sendTime` 构造（形如 `SCHEDULE-STATION-REALTIME-DATA_1699999200`），超时会写出缺失场站数量的警告日志。
+- 批次 ID 由服务在触发时生成，格式为 `f"batch_{int(time.time()*1000)}_{id(batch)}"` （毫秒时间戳 + 对象地址），可保证在进程内唯一，超时会写出缺失场站数量的警告日志。
 
 **容错**：
 - 某场站 callback 抛错或返回 `None` 只会影响其自身，不会阻止批次上传。
 - `_monitor_batch` 使用 `asyncio.wait_for` + `batch_timeout` 控制最长等待，并在 `BatchCollector.force_complete()` 中打印成功/失败/无输出计数，便于排查。
 
-<a id="sec-2-3-7"></a>
-#### 2.3.7 OffsetManager（异步offset调度）
+<a id="sec-2-3-8"></a>
+#### 2.3.8 OffsetManager（异步offset调度）
 
 **位置**：`d_a/offset_manager.py`
 
@@ -792,8 +896,8 @@ async def _do_upload():
 - `_main_loop` 每次 `getmany` 之后都会调用 `offset_manager.track_message(msg)`（在解析流程中完成），并在批次结束或空拉取时检查 `should_commit()`；Service 停止前会强制 `commit()` 确保不丢offset。
 - 若提交失败会保留 `_pending_offsets`，下个周期重试，不会出现 offset 回退。
 
-<a id="sec-2-3-8"></a>
-#### 2.3.8 全局数据缓存与场站自举
+<a id="sec-2-3-9"></a>
+#### 2.3.9 全局数据缓存与场站自举
 
 **场景**：`SCHEDULE-ENVIRONMENT-CALENDAR` 等全局Topic可能在任何场站出现之前就到达，旧逻辑会因“尚无场站”而丢弃消息。
 
@@ -807,8 +911,8 @@ async def _do_upload():
 
 **优点**：解决先有全局数据、后有场站的竞态；缓存体积极小（Topic级别的最新一条记录），无需额外清理。
 
-<a id="sec-2-3-9"></a>
-#### 2.3.9 数据可用性元信息 `_data_quality`
+<a id="sec-2-3-10"></a>
+#### 2.3.10 数据可用性元信息 `_data_quality`
 
 **来源**：`DataDispatcher.get_module_input()` 会在返回的字典中附加 `_data_quality` 字段，用于业务方评估各Topic数据是否可用。
 
@@ -852,10 +956,10 @@ def callback(station_id, module_input):
      - `host_id`：主机ID
      - `meter_id`：电表ID
 
-2. **配置文件**（config.py）：
-   - **KAFKA_CONFIG**：Kafka连接配置
-     - 支持嵌套结构（推荐）：`{'consumer': {...}, 'producer': {...}}`
-     - 支持扁平结构（向后兼容）：`{'bootstrap_servers': ..., 'group_id': ...}`
+2. **配置文件**（config.yaml）：
+   - **kafka 节**（对应 KAFKA_CONFIG）：Kafka连接配置
+     - 支持嵌套结构（推荐）：`consumer:` / `producer:` 子节
+     - 支持扁平结构（向后兼容）：`bootstrap_servers`、`group_id` 等顶层键
      - 必需字段：`bootstrap_servers`（字符串列表）
    
    - **TOPIC_DETAIL**：Topic详细配置
@@ -1314,7 +1418,7 @@ service.reload_config()
 - MODULE_TO_TOPICS：变更模块订阅的Topic
 
 **不支持的更新**：
-- KAFKA_CONFIG：需要重启服务（影响连接）
+- `kafka` 节配置（Kafka连接参数）：需要重启服务（影响连接）
 - 窗口大小变更：现有窗口保持原大小，新数据按新配置
 
 **更新流程**：
@@ -1424,15 +1528,15 @@ finally:
 
 ### 7.6 安全性考虑
 
-**认证与加密**：
-```python
-KAFKA_CONFIG = {
-    'security_protocol': 'SASL_SSL',
-    'sasl_mechanism': 'PLAIN',
-    'sasl_plain_username': 'user',
-    'sasl_plain_password': 'password',
-    'ssl_cafile': '/path/to/ca-cert',
-}
+**认证与加密**（`config.yaml`）：
+```yaml
+kafka:
+  consumer:
+    security_protocol: SASL_SSL
+    sasl_mechanism: PLAIN
+    sasl_plain_username: user
+    sasl_plain_password: password
+    ssl_cafile: /path/to/ca-cert
 ```
 
 **数据隔离**：
@@ -1447,41 +1551,40 @@ KAFKA_CONFIG = {
 
 ## 8. 附录
 
-### 附录A：Kafka配置示例（嵌套/扁平，兼容）
+### 附录A：Kafka配置示例（config.yaml格式）
 
-- 嵌套（推荐）：
-```python
-KAFKA_CONFIG = {
-    'consumer': {
-        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092'],
-        'group_id': 'data_analysis',
-        'auto_offset_reset': 'latest',
-        'enable_auto_commit': True,
-        'max_poll_records': 500,
-    },
-    'producer': {
-        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092'],
-        'acks': 'all',
-        'retries': 3,
-        'compression_type': 'gzip',
-    }
-}
-```
-- 扁平（向后兼容）：
-```python
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['kafka1:9092', 'kafka2:9092'],
-    'group_id': 'data_analysis',
-    'auto_offset_reset': 'latest',
-    'enable_auto_commit': True,
-}
+```yaml
+kafka:
+  bootstrap_servers:
+    - kafka1:9092
+    - kafka2:9092
+  consumer:
+    group_id: data_analysis
+    auto_offset_reset: latest
+    enable_auto_commit: false
+    max_poll_records: 500
+    multi_consumer_mode: true
+  producer:
+    acks: all
+    retries: 3
+    compression_type: gzip
 ```
 
-注意：当前实现要求顶层存在 bootstrap_servers；若仅在嵌套中声明，需确保代码已更新为同时兼容两种声明方式。
+> 代码参数 `kafka_config=` 同时支持嵌套/扁平 Python dict 格式（优先级高于 YAML）。
 
 ### 附录B：Topic配置与窗口
 
-**配置结构**（config.py）：
+> **v2.0 变更**：Topic配置迁移到 `config.yaml` 的 `topic_detail` 节，格式如下（以 SCHEDULE-STATION-PARAM 为例）：
+> ```yaml
+> topic_detail:
+>   SCHEDULE-STATION-PARAM:
+>     fields: [stationId, stationLng, stationLat, gunNum, gridCapacity, ...]
+>     frequency: 1
+>     modules: [load_prediction, operation_optimization, electricity_price, SOH_model]
+>     window_size: 1
+> ```
+
+**全量 topic 字段参考**（同时保留 Python 格式便于查阅）：
 ```python
 TOPIC_DETAIL = {
     'SCHEDULE-STATION-PARAM': {
@@ -1696,21 +1799,20 @@ MODULE_DEPENDENCIES = {
 }
 ```
 
-**输出Topic映射**：
-```python
-MODULE_OUTPUT_TOPIC_PREFIX = "MODULE-OUTPUT-"
-
-MODULE_OUTPUT_TOPICS = {
-    'electricity_price': 'MODULE-OUTPUT-ELECTRICITY_PRICE',
-    'load_prediction': 'MODULE-OUTPUT-LOAD_PREDICTION',
-    'pv_prediction': 'MODULE-OUTPUT-PV_PREDICTION',
-    'thermal_management': 'MODULE-OUTPUT-THERMAL_MANAGEMENT',
-    'station_guidance': 'MODULE-OUTPUT-STATION_GUIDANCE',
-    'evaluation_model': 'MODULE-OUTPUT-EVALUATION_MODEL',
-    'SOH_model': 'MODULE-OUTPUT-SOH_MODEL',
-    'operation_optimization': 'MODULE-OUTPUT-OPERATION_OPTIMIZATION',
-    'customer_mining': 'MODULE-OUTPUT-CUSTOMER_MINING',
-}
+**输出Topic映射**（`config.yaml` 的 `module_output` 节）：
+```yaml
+module_output:
+  topic_prefix: "MODULE-OUTPUT-"
+  topics:
+    electricity_price: MODULE-OUTPUT-ELECTRICITY-PRICE
+    load_prediction: MODULE-OUTPUT-LOAD-PREDICTION
+    pv_prediction: MODULE-OUTPUT-PV-PREDICTION
+    thermal_management: MODULE-OUTPUT-THERMAL-MANAGEMENT
+    station_guidance: MODULE-OUTPUT-STATION-GUIDANCE
+    evaluation_model: MODULE-OUTPUT-EVALUATION-MODEL
+    SOH_model: MODULE-OUTPUT-SOH-MODEL
+    operation_optimization: MODULE-OUTPUT-OPERATION-OPTIMIZATION
+    customer_mining: MODULE-OUTPUT-CUSTOMER-MINING
 ```
 
 **依赖解析流程**：
@@ -1723,7 +1825,7 @@ deps = MODULE_DEPENDENCIES.get('electricity_price', [])
 for dep in deps:
     # 获取输出Topic
     output_topic = MODULE_OUTPUT_TOPICS.get(dep)
-    # output_topic = 'MODULE-OUTPUT-PV_PREDICTION'
+    # output_topic = 'MODULE-OUTPUT-PV-PREDICTION'
     
     # 获取该Topic的窗口数据
     dep_window = dispatcher.get_topic_window(station_id, output_topic)
@@ -2005,20 +2107,17 @@ async def stress_test():
 asyncio.run(stress_test())
 ```
 
-**本地开发配置**：
-```python
-# config.py - 开发环境配置
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['localhost:9092'],
-    'consumer': {
-        'group_id': 'dev_data_analysis',
-        'auto_offset_reset': 'earliest',  # 从头消费
-        'enable_auto_commit': True,
-    },
-    'producer': {
-        'acks': 1,  # 开发环境可降低确认级别
-    }
-}
+**本地开发配置**（`config.yaml`）：
+```yaml
+kafka:
+  bootstrap_servers:
+    - localhost:9092
+  consumer:
+    group_id: dev_data_analysis
+    auto_offset_reset: earliest   # 从头消费
+    enable_auto_commit: false
+  producer:
+    acks: "1"   # 开发环境可降低确认级别
 ```
 
 **调试技巧**：
@@ -2075,14 +2174,18 @@ git push origin feature/your-feature
 
 **文档完整性声明**：
 
-本说明书基于data_analysis项目实际代码（更新日期：2025-11-07）编写，与以下文件保持一致：
+本说明书基于data_analysis项目实际代码（更新日期：2026-03-09，v2.0.0）编写，与以下文件保持一致：
 - `d_a/analysis_service.py`（同步/异步服务实现）
+- `d_a/service_base.py`（服务公共基类）
 - `d_a/dispatcher.py`（数据分发核心逻辑）
 - `d_a/kafka_client.py`（Kafka客户端封装）
-- `d_a/config.py`（配置文件）
-- `d_a/errors.py`（异常定义和错误处理）
+- `d_a/config.py`（YAML配置加载器）
+- `d_a/errors.py`（异常定义和日志初始化）
+- `d_a/parser_base.py`（解析器基类）
+- `d_a/batch_result_aggregator.py`（批次结果聚合）
+- `d_a/offset_manager.py`（Offset提交管理）
 - `d_a/parsers/`（业务模块解析器）
-- `d_a/topic_parsers/`（Topic解析器）
+- `d_a/topic_parsers/`（Topic解析器，共13个）
 
 详细API参考、部署指南、开发者文档请参阅：
 - **API.md**：完整的API接口文档
@@ -2090,7 +2193,7 @@ git push origin feature/your-feature
 - **DEVELOPER.md**：开发者贡献指南
 
 项目仓库：[GitHub - data_analysis](https://github.com/fenwickxie/data_analysis)  
-分支：feature-one
+分支：develop
 
 ---
 

@@ -1,25 +1,23 @@
 # 开发者指南
 
-> **文档版本**：v1.2  
-> **更新日期**：2025-11-23  
-> **对应代码版本**：data_analysis v1.1 (branch: feature-one)
+> **文档版本**：v2.0  
+> **更新日期**：2026-03-09  
+> **对应代码版本**：data_analysis v2.0.0 (branch: develop)
 
 本文档为data_analysis模块的开发者提供详细的架构说明、扩展指南和性能优化建议。
 
 **修订说明**：
+- v2.0 (2026-03-09): 全面对齐 v2.0.0 代码实现
+    - 配置系统迁移：`config.py` 升级为 YAML 加载器，所有配置均来自 `config.yaml`
+    - 新增 `service_base.py` 公共基类说明
+    - 新增 `SCHEDULE-ENVIRONMENT-WEATHER`、`SCHEDULE-DEVICE-PV` 两个 topic，共 13 个
+    - `AsyncDataAnalysisService.__init__` 移除 `output_topic_prefix`，新增 `offset_commit_config`
+    - `DataDispatcher.__init__` 新增 `enable_data_expiration` 参数
+    - `update_topic_data` 返回 `bool`（`should_trigger`），新增 `timestamp` 参数
+    - 新增 `_station_init_hook`（场站初始化钩子）与上传限速（`upload_interval_seconds`）说明
+    - 扩展指南中的配置示例全部更新为 YAML 格式；`__version__` 修正为 2.0.0
 - v1.2 (2025-11-23): 融合批次聚合、数据可用性、全局缓存、多消费者与重构计划文档
-    - 新增 BatchResultAggregator、OffsetManager、Global Data Cache、multi-consumer 等内部组件说明
-    - 记录 `_data_quality` 元信息与全局数据竞态修复策略
-    - 总结 offset out-of-range 处理、group_id 迁移和空拉取诊断手册
-    - 扩展 Topic/站点解析指南，列举所有受支持的数据格式
-    - 引入重构路线图与相关测试指引
 - v1.1 (2025-11-07): 更新以匹配实际开发需求
-    - 更正架构组件描述以反映实际实现
-    - 更新Topic和Module解析器添加流程
-    - 移除未实现的padding策略相关内容
-    - 更新Kafka配置最佳实践
-    - 补充实际的测试用例位置和使用方法
-    - 添加项目结构说明
 
 ## 目录
 
@@ -63,33 +61,37 @@ data_analysis模块采用分层架构设计，核心包名为 `d_a`，主要包�
 **项目结构**：
 ```
 d_a/
-├── __init__.py                 # 包初始化，导出公共API
+├── __init__.py                 # 包初始化，导出公共API（v2.0.0）
 ├── analysis_service.py         # 同步和异步服务主类
+├── service_base.py             # 服务公共基类（提取共享逻辑）
 ├── dispatcher.py               # 数据分发器（核心路由逻辑）
 ├── kafka_client.py             # Kafka客户端封装
-├── config.py                   # 配置文件（Kafka、Topic、依赖）
-├── errors.py                   # 异常定义和错误处理
-├── parser_base.py              # 解析器基类
-├── main.py                     # 命令行入口（可选）
-├── doc/                        # 文档目录
-│   ├── API.md
-│   ├── DEPLOYMENT.md
-│   ├── DEVELOPER.md
-│   └── ALGORITHM_DESIGN_SPEC.md
-├── topic_parsers/              # Topic解析器
+├── config.py                   # YAML配置加载器（从config.yaml读取）
+├── errors.py                   # 异常定义、日志初始化
+├── parser_base.py              # 解析器基类（ParserBase / ConfigBasedParser）
+├── batch_result_aggregator.py  # 批次结果聚合器
+├── offset_manager.py           # 手动Offset提交管理器
+├── mock/                       # 测试工具（虚拟数据注入）
+│   ├── __init__.py
+│   ├── mock_config.py          # 注入触发配置（MOCK_DATA/MOCK_FORCE/MOCK_STATIONS）
+│   ├── mock_data.py            # MockDataManager与各Provider实现
+│   └── mock_presets.py         # 全局预设数据
+├── topic_parsers/              # Topic解析器（共13个）
 │   ├── __init__.py
 │   ├── station_param.py        # SCHEDULE-STATION-PARAM
-│   ├── station_realtime_data.py # REAL-STATION-DATA
-│   ├── device_gun.py           # DEVICE-GUN-DATA
-│   ├── device_storage.py       # STORAGE-DATA
-│   ├── car_order.py            # CAR-ORDER-DATA
-│   ├── car_price.py            # CAR-PRICE-DATA
-│   ├── device_error.py         # DEVICE-ERROR-DATA
-│   ├── device_host.py          # DEVICE-HOST-DATA
-│   ├── device_meter.py         # METER-DATA
-│   ├── environment_calendar.py # ENV-CALENDAR-DATA
+│   ├── station_realtime_data.py # SCHEDULE-STATION-REALTIME-DATA
+│   ├── device_gun.py           # SCHEDULE-DEVICE-GUN
+│   ├── device_storage.py       # SCHEDULE-DEVICE-STORAGE
+│   ├── device_host.py          # SCHEDULE-DEVICE-HOST-DCDC/ACDC
+│   ├── device_meter.py         # SCHEDULE-DEVICE-METER
+│   ├── device_pv.py            # SCHEDULE-DEVICE-PV
+│   ├── car_order.py            # SCHEDULE-CAR-ORDER
+│   ├── car_price.py            # SCHEDULE-CAR-PRICE
+│   ├── device_error.py         # SCHEDULE-DEVICE-ERROR
+│   ├── environment_calendar.py # SCHEDULE-ENVIRONMENT-CALENDAR（全局）
+│   ├── environment_weather.py  # SCHEDULE-ENVIRONMENT-WEATHER
 │   └── model_output.py         # MODULE-OUTPUT-*（通用）
-└── parsers/                    # 业务模块解析器
+└── parsers/                    # 业务模块解析器（共9个）
     ├── __init__.py
     ├── load_prediction_parser.py
     ├── pv_prediction_parser.py
@@ -102,14 +104,17 @@ d_a/
     └── customer_mining_parser.py
 ```
 
+> 项目根目录还包含 `config.yaml.example`（配置模板，复制为 `config.yaml` 后修改使用）和 `docs/`（文档目录）。
+
 ### 核心组件
 
 1. **DataAnalysisService / AsyncDataAnalysisService** (`analysis_service.py`)
-   - 主服务类，负责协调整个数据解析流程
-   - 管理Kafka消费者/生产者生命周期
+   - 主服务类，均继承自 `ServiceBase`（`service_base.py`）
+   - `ServiceBase` 封装 topic 订阅解析（`_resolve_topics`），可按 `module_name` 自动确定订阅列表
+   - 管理Kafka消费者生命周期
    - 维护DataDispatcher实例
    - 处理多场站并发（同步使用ThreadPoolExecutor，异步使用asyncio.Task）
-   - 提供健康检查和配置热更新API
+   - `AsyncDataAnalysisService` 额外支持：批次聚合上传、上传限速（`upload_interval_seconds`）、场站初始化钩子（`_station_init_hook`）
 
 2. **DataDispatcher** (`dispatcher.py`)
    - 数据分发与依赖处理核心
@@ -119,15 +124,15 @@ d_a/
    - 处理模块间依赖关系（递归聚合）
    - 自动清理过期数据
 
-3. **ParserBase** (`parser_base.py`)
-   - 解析器抽象基类，定义统一接口 `parse(data)`
-   - 所有topic解析器和业务模块解析器均继承此类
+3. **ParserBase / ConfigBasedParser** (`parser_base.py`)
+   - `ParserBase`：解析器抽象基类，定义统一接口 `parse(data)` 和默认 `parse_window()` 实现
+   - `ConfigBasedParser`：借助 `TOPIC_DETAIL` 从 YAML 配置中读取字段列表，简化简单 topic 的解析
 
 4. **Topic解析器** (`topic_parsers/`)
    - 负责解析各topic的Kafka原始消息（JSON）
    - 将原始数据转换为结构化格式
    - 提取关键字段（如 `stationId`, `timestamp` 等，注意使用camelCase）
-   - 11个topic解析器对应11个数据源
+   - **13个**topic解析器对应13个数据源（含 `SCHEDULE-ENVIRONMENT-WEATHER`、`SCHEDULE-DEVICE-PV`）
 
 5. **业务模块解析器** (`parsers/`)
    - 整合多topic窗口数据，生成业务模块所需输入
@@ -276,34 +281,23 @@ __all__ = [
 ]
 ```
 
-在 `d_a/dispatcher.py` 中添加映射（在 `__init__` 方法中）：
+在 `d_a/dispatcher.py` 的 `TOPIC_PARSER_MAP` 字典（模块顶层常量）和 `_topic_updaters`（`_build_topic_updaters` 方法）中添加映射，并在 `analysis_service.py` 的 `_build_topic_handlers` 方法中添加对应的消息格式处理器。
 
-```python
-from d_a.topic_parsers import NewTopicParser
+在 `config.yaml` 的 `topic_detail` 节下添加 topic 配置：
 
-class DataDispatcher:
-    def __init__(self, data_expire_seconds=600):
-        # 其他初始化代码...
-        
-        # Topic解析器映射
-        self.topic_parsers = {
-            "NEW-TOPIC": NewTopicParser(),
-            # 其他解析器...
-        }
-```
-
-在 `d_a/config.py` 中添加topic配置：
-
-```python
-TOPIC_DETAIL = {
-    'NEW-TOPIC': {
-        'fields': ['stationId', 'timestamp', 'field1', 'field2'],  # camelCase字段名
-        'frequency': '1分钟',
-        'modules': ['load_prediction', 'operation_optimization'],  # 需要此数据的模块
-        'window_size': 60  # 根据业务需求设置窗口大小
-    },
-    # 其他topic配置...
-}
+```yaml
+# config.yaml
+topic_detail:
+  NEW-TOPIC:
+    fields:
+      - stationId
+      - field1
+      - field2
+    frequency: 60   # 每小时60次
+    modules:
+      - load_prediction
+      - operation_optimization
+    window_size: 60
 ```
 
 ### 消息格式支持与 `extract_station_data`
@@ -395,193 +389,142 @@ __all__ = [
 ]
 ```
 
-在 `d_a/dispatcher.py` 中添加映射（在 `__init__` 方法中）：
+在 `d_a/dispatcher.py` 的 `self.parsers` 字典中添加映射，并在 `config.yaml` 中配置模块依赖和输出：
 
-```python
-from d_a.parsers import NewModuleParser
+```yaml
+# config.yaml
+module_dependencies:
+  new_module:
+    - load_prediction   # 依赖的其他模块
+    - pv_prediction
 
-class DataDispatcher:
-    def __init__(self, data_expire_seconds=600):
-        # 其他初始化代码...
-        
-        # 模块解析器映射
-        self.module_parsers = {
-            "new_module": NewModuleParser(),
-            # 其他解析器...
-        }
-```
-
-在 `d_a/config.py` 中添加模块配置：
-
-```python
-# 模块依赖关系（如果新模块依赖其他模块）
-MODULE_DEPENDENCIES = {
-    'new_module': ['load_prediction', 'pv_prediction'],  # 新模块依赖的其他模块
-    # 其他依赖...
-}
-
-# 模块输出topic映射（如果需要自动上传结果到Kafka）
-MODULE_OUTPUT_TOPICS = {
-    'new_module': 'MODULE-OUTPUT-NEW-MODULE',  # 输出topic名称
-    # 其他模块...
-}
+module_output:
+  topics:
+    new_module: "MODULE-OUTPUT-NEW-MODULE"
 ```
 
 ### 窗口大小配置
 
-在 `d_a/config.py` 中修改topic的 `window_size`：
+在 `config.yaml` 的 `topic_detail` 下修改对应 topic 的 `window_size`：
 
-```python
-TOPIC_DETAIL = {
-    'REAL-STATION-DATA': {
-        'fields': ['stationId', 'timestamp', 'totalPower', ...],
-        'frequency': '15秒',
-        'modules': ['load_prediction', 'evaluation_model'],
-        'window_size': 7 * 24 * 60 * 4  # 7天数据，15秒一次
-    },
-    'SCHEDULE-STATION-PARAM': {
-        'fields': ['stationId', 'stationTemp', ...],
-        'frequency': '配置更改时',
-        'modules': ['load_prediction', 'operation_optimization'],
-        'window_size': 1  # 配置数据只需要最新一个
-    },
-}
+```yaml
+topic_detail:
+  SCHEDULE-STATION-REALTIME-DATA:
+    window_size: 168   # 1小时1次，7天=168
+  SCHEDULE-STATION-PARAM:
+    window_size: 1     # 低频配置数据，只需最新1条
+  SCHEDULE-DEVICE-STORAGE:
+    window_size: 1     # 设备聚合类（dict聚合，maxlen=1）
 ```
-
-**窗口大小计算**：
-- 高频数据（15秒）：7天 = `7 * 24 * 60 * 4 = 40320` 个数据点
-- 中频数据（1分钟）：1小时 = `60` 个数据点
-- 低频数据（配置）：`1` 个数据点即可
 
 **注意事项**：
 - 窗口过大会增加内存消耗，需权衡业务需求和资源限制
-- 当前版本（v1.1）**不支持**窗口补全策略（如zero、linear、forward）
-- 窗口不足时，缺失的数据项为 `None`
-- 未来版本可能添加补全策略支持
+- `ParserBase.parse_window()` 提供默认窗口处理（字段拼接为列表），子类可重写实现插值、枪号对齐等自定义补全逻辑
+- `DataDispatcher.set_padding_strategy()` 保留了 `zero/linear/forward/missing` 接口，当前版本主要依赖各 parser 自行实现补全逻辑
 
 ### 配置最佳实践
 
 #### Kafka配置优化
 
-**开发环境配置**:
-```python
-KAFKA_CONFIG = {
-    'consumer': {
-        'bootstrap_servers': ['localhost:9092'],
-        'group_id': 'data_analysis_dev',
-        'auto_offset_reset': 'earliest',  # 开发时从头消费
-        'enable_auto_commit': True,
-        'max_poll_records': 100,  # 开发环境可以减少
-    },
-    'producer': {
-        'bootstrap_servers': ['localhost:9092'],
-        'acks': '1',  # 开发环境可以降低要求
-        'retries': 1,
-        'compression_type': 'none',  # 开发环境可以不压缩
-    }
-}
+> **v2.0 重要变更**：所有配置均通过 `config.yaml` 管理，不再在 `config.py` 中硬编码 Python 字典。
+> 文件查找顺序：`load_config(path)` 参数 → `DATA_ANALYSIS_CONFIG_PATH` 环境变量 → `./config.yaml` → 包目录内置 `config.yaml`。
+
+**开发环境配置**（`config.yaml`）:
+```yaml
+kafka:
+  bootstrap_servers:
+    - localhost:9092
+  consumer:
+    group_id: data_analysis_dev
+    auto_offset_reset: earliest
+    enable_auto_commit: false
+    max_poll_records: 100
+    multi_consumer_mode: false
+  producer:
+    acks: "1"
+    retries: 1
+    compression_type: none
 ```
 
-**生产环境配置**:
-```python
-KAFKA_CONFIG = {
-    'consumer': {
-        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
-        'group_id': 'data_analysis_prod',
-        'auto_offset_reset': 'latest',
-        'enable_auto_commit': True,
-        'max_poll_records': 500,
-        'session_timeout_ms': 30000,
-        'request_timeout_ms': 40000,
-        'heartbeat_interval_ms': 3000,
-        'max_poll_interval_ms': 300000,
-    },
-    'producer': {
-        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
-        'acks': 'all',  # 生产环境必须保证可靠性
-        'retries': 3,
-        'max_in_flight_requests_per_connection': 5,
-        'compression_type': 'gzip',  # 启用压缩
-        'linger_ms': 10,
-        'batch_size': 16384,
-        'buffer_memory': 33554432,
-    }
-}
+**生产环境配置**（`config.yaml`）:
+```yaml
+kafka:
+  bootstrap_servers:
+    - kafka1:9092
+    - kafka2:9092
+    - kafka3:9092
+  consumer:
+    group_id: data_analysis_prod
+    auto_offset_reset: latest
+    enable_auto_commit: false
+    max_poll_records: 500
+    multi_consumer_mode: true
+    session_timeout_ms: 30000
+    request_timeout_ms: 40000
+    heartbeat_interval_ms: 3000
+    max_poll_interval_ms: 300000
+  producer:
+    acks: all
+    retries: 3
+    compression_type: gzip
+    linger_ms: 10
+    batch_size: 16384
+    buffer_memory: 33554432
 ```
 
 #### 安全配置（SASL/SSL）示例
 
-- 嵌套（推荐）：
+嵌套格式（推荐，加在 `consumer` / `producer` 节下）：
 
-```python
-KAFKA_CONFIG = {
-    'consumer': {
-        'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
-        'group_id': 'prod_group',
-        'security_protocol': 'SASL_SSL',
-        'sasl_mechanism': 'PLAIN',
-        'sasl_plain_username': 'user',
-        'sasl_plain_password': 'pass',
-    },
-    'producer': {
-        'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
-        'acks': 'all',
-        'compression_type': 'gzip',
-        'security_protocol': 'SASL_SSL',
-        'sasl_mechanism': 'PLAIN',
-        'sasl_plain_username': 'user',
-        'sasl_plain_password': 'pass',
-    }
-}
+```yaml
+kafka:
+  bootstrap_servers:
+    - kafka1:9092
+    - kafka2:9092
+  consumer:
+    group_id: prod_group
+    security_protocol: SASL_SSL
+    sasl_mechanism: PLAIN
+    sasl_plain_username: user
+    sasl_plain_password: pass
+    ssl_cafile: /path/ca.pem
+    ssl_certfile: /path/cert.pem
+    ssl_keyfile: /path/key.pem
+  producer:
+    acks: all
+    compression_type: gzip
+    security_protocol: SASL_SSL
+    sasl_mechanism: PLAIN
+    sasl_plain_username: user
+    sasl_plain_password: pass
 ```
 
-- 扁平（兼容）：
-
-```python
-KAFKA_CONFIG = {
-    'bootstrap_servers': ['kafka1:9092','kafka2:9092'],
-    'group_id': 'prod_group',
-    'security_protocol': 'SASL_SSL',
-    'sasl_mechanism': 'PLAIN',
-    'sasl_plain_username': 'user',
-    'sasl_plain_password': 'pass',
-    # 同步客户端还支持：
-    'ssl_cafile': '/path/ca.pem',
-    'ssl_certfile': '/path/cert.pem',
-    'ssl_keyfile': '/path/key.pem',
-}
-```
+> 若通过代码传入 `kafka_config` 字典（两种格式均可），键名规则与上述 YAML 相同。两种传入方式：
+> 1. `config.yaml`（推荐）—— 自动加载，无需代码修改
+> 2. 构造函数参数 `kafka_config=` —— 优先级最高，会覆盖 YAML 中的 kafka 节
 
 参数透传白名单（当前实现）：
 - 消费者：group_id, auto_offset_reset, enable_auto_commit, max_poll_records, session_timeout_ms, request_timeout_ms, heartbeat_interval_ms, max_poll_interval_ms, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
 - 生产者：acks, retries, compression_type, linger_ms, batch_size, max_in_flight_requests_per_connection, buffer_memory, security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password, ssl_cafile, ssl_certfile, ssl_keyfile
-- 异步（aiokafka）消费者/生产者：security_protocol, sasl_mechanism, sasl_plain_username, sasl_plain_password
+- 异步客户端支持 `multi_consumer_mode: true`（每个 topic 独立 consumer）
 
-**配置说明**:
-- 开发环境注重便利性和调试能力
-- 生产环境注重可靠性、性能和容错能力
-- 使用多个broker地址提高高可用性
-- 合理配置超时参数避免频繁重连
-
-#### Offset管理配置（v1.1新增）
+#### Offset管理配置
 
 **为什么需要手动offset管理？**
 
-自动提交offset（`enable_auto_commit=True`）存在以下问题：
+自动提交offset（`enable_auto_commit: true`）存在以下问题：
 1. 消息可能在处理完成前就被提交，导致消息丢失
 2. 处理失败的消息也会被标记为已消费
-3. 无法实现精确的"至少一次"或"恰好一次"语义
+3. 无法实现精确的"至少一次"语义
 
-**手动offset管理机制**（`enable_auto_commit=False`）：
+**手动offset管理机制**（`enable_auto_commit: false`，在 `config.yaml` 中配置）：
 
-```python
-# config.py中的offset管理配置
-OFFSET_COMMIT_CONFIG = {
-    'commit_interval_seconds': 5.0,  # 定时提交间隔（秒）
-    'commit_batch_size': 100,        # 累积消息数提交阈值
-    'max_commit_retries': 3,         # 提交失败重试次数
-    'commit_retry_delay': 1.0,       # 重试延迟（秒）
-}
+```yaml
+offset_commit:
+  commit_interval_seconds: 5.0   # 定时提交间隔（秒）
+  commit_batch_size: 100         # 累积消息数提交阈值
+  max_commit_retries: 3          # 提交失败重试次数
+  commit_retry_delay: 1.0        # 重试延迟（秒）
 ```
 
 **实现特性**：
@@ -678,7 +621,7 @@ TOPIC_DETAIL = {
 1. **Kafka消费/生产速度**：高频数据（15秒间隔）可能导致Kafka成为瓶颈
    - 优化方案：增加Kafka分区数，启用消息压缩（gzip）
    
-2. **Offset提交开销**（v1.1新增）：频繁提交offset会增加与Kafka的网络交互
+2. **Offset提交开销**：频繁提交offset会增加与Kafka的网络交互
    - 监控指标：offset提交频率、提交延迟
    - 优化方案：根据消息量调整`commit_batch_size`和`commit_interval_seconds`
    
@@ -848,7 +791,6 @@ asyncio.run(generate_test_data())
 import pytest
 import asyncio
 from d_a import AsyncDataAnalysisService
-from d_a.config import KAFKA_CONFIG
 
 @pytest.mark.asyncio
 async def test_complete_data_flow():
@@ -863,10 +805,9 @@ async def test_complete_data_flow():
         })
         return module_input
     
-    # 创建服务
+    # 创建服务（Kafka配置由 config.yaml 自动加载）
     service = AsyncDataAnalysisService(
-        module_name='test_module',
-        kafka_config=KAFKA_CONFIG
+        module_name='test_module'
     )
     
     try:
@@ -944,13 +885,12 @@ import time
 import psutil
 import asyncio
 from d_a import AsyncDataAnalysisService
-from d_a.config import KAFKA_CONFIG
 
 async def performance_test():
     """性能测试示例"""
+    # Kafka配置由 config.yaml 自动加载
     service = AsyncDataAnalysisService(
-        module_name='performance_test',
-        kafka_config=KAFKA_CONFIG
+        module_name='performance_test'
     )
     
     # 记录性能指标

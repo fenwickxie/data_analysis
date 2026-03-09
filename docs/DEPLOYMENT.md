@@ -1,19 +1,20 @@
 # 部署指南
 
-> **文档版本**：v1.1  
-> **更新日期**：2025-11-07  
-> **对应代码版本**：data_analysis v1.1 (branch: feature-one)
+> **文档版本**：v2.0  
+> **更新日期**：2026-03-09  
+> **对应代码版本**：data_analysis v2.0.0 (branch: develop)
 
 本文档提供data_analysis模块的部署指南，包括环境要求、部署步骤、监控和日志配置，以及高可用配置方案。
 
 **修订说明**：
+- v2.0 (2026-03-09): 全面对齐 v2.0.0 代码实现
+  - 配置系统迁移至 YAML（`config.yaml`）；所有环境变量/Python dict 示例改为 YAML 格式
+  - 新增 `PyYAML` 依赖说明
+  - 新增 `service_base.py`、`offset_manager.py`、`batch_result_aggregator.py` 文件说明
+  - 更新服务构造函数示例（移除 `output_topic_prefix`，新增 `offset_commit_config`）
+  - 新增 `upload_interval_seconds` 配置说明
+  - 版本号修正为 2.0.0；分支修正为 develop
 - v1.1 (2025-11-07): 更新以匹配实际部署需求
-  - 更正配置中的字段命名（使用camelCase）
-  - 更新Kafka配置示例与实际代码一致
-  - 补充实际的依赖包列表
-  - 更新监控和日志配置为实际实现
-  - 完善容器化和Kubernetes部署示例
-  - 添加Python 3.9+支持说明
 
 ## 目录
 
@@ -36,6 +37,7 @@
 ```txt
 kafka-python>=2.0.2      # 同步Kafka客户端
 aiokafka>=0.7.2          # 异步Kafka客户端
+PyYAML>=6.0              # 配置文件解析（v2.0新增）
 ```
 
 可选依赖（用于开发和测试）：
@@ -90,59 +92,63 @@ pip install pytest pytest-asyncio pytest-cov
 # 创建配置目录
 mkdir -p /opt/data_analysis/config
 
-# 复制并修改配置文件
-cp data_analysis/config.py /opt/data_analysis/config/
+# 复制配置模板并修改参数
+cp data_analysis/config.yaml.example /opt/data_analysis/config.yaml
 # 编辑配置文件，修改Kafka连接等参数
-vim /opt/data_analysis/config/config.py
+vim /opt/data_analysis/config.yaml
 ```
+
+> **v2.0 变更**：配置文件由 `config.py`（Python dict）迁移为 `config.yaml`（YAML）。文件查找顺序：`DATA_ANALYSIS_CONFIG_PATH` 环境变量 → `./config.yaml` → 包目录内置默认值。
 
 **重要配置项说明**：
 
 #### Kafka配置
 
-推荐使用嵌套格式，为消费者和生产者分别配置参数：
+推荐在 `config.yaml` 中使用嵌套格式：
 
-```python
-KAFKA_CONFIG = {
-    'consumer': {
-        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
-        'group_id': 'data_analysis_group',
-        'auto_offset_reset': 'latest',
-        'enable_auto_commit': False,  # 关闭自动提交，使用手动offset管理
-        'max_poll_records': 500,
-        'session_timeout_ms': 30000,
-        'request_timeout_ms': 40000,
-        'heartbeat_interval_ms': 3000,
-    },
-    'producer': {
-        'bootstrap_servers': ['kafka1:9092', 'kafka2:9092', 'kafka3:9092'],
-        'acks': 'all',  # 生产环境建议使用'all'保证数据可靠性
-        'retries': 3,
-        'max_in_flight_requests_per_connection': 5,
-        'compression_type': 'gzip',  # 启用压缩节省网络带宽
-        'linger_ms': 10,  # 批量发送延迟，提高吞吐量
-        'batch_size': 16384,  # 批量大小
-    }
-}
+```yaml
+kafka:
+  bootstrap_servers:
+    - kafka1:9092
+    - kafka2:9092
+    - kafka3:9092
+  consumer:
+    group_id: data_analysis_group
+    auto_offset_reset: latest
+    enable_auto_commit: false   # 关闭自动提交，使用 OffsetManager 手动管理
+    max_poll_records: 500
+    session_timeout_ms: 30000
+    request_timeout_ms: 40000
+    heartbeat_interval_ms: 3000
+    multi_consumer_mode: true   # 每个topic独立consumer，避免热点topic饥饿
+  producer:
+    acks: all
+    retries: 3
+    compression_type: gzip
+    linger_ms: 10
+    batch_size: 16384
 
-# Offset管理配置（v1.1新增）
-OFFSET_COMMIT_CONFIG = {
-    'commit_interval_seconds': 5.0,  # 定时提交间隔（秒）
-    'commit_batch_size': 100,        # 累积消息数提交阈值
-    'max_commit_retries': 3,         # 提交失败重试次数
-    'commit_retry_delay': 1.0,       # 重试延迟（秒）
-}
+# Offset管理配置（手动提交）
+offset_commit:
+  commit_interval_seconds: 5.0
+  commit_batch_size: 100
+  max_commit_retries: 3
+  commit_retry_delay: 1.0
+
+# 上传限速（0=不限速）
+upload_interval_seconds: 0
 ```
 
 **配置说明**：
 
 - `bootstrap_servers`: 配置多个Kafka broker地址以支持高可用
-- `enable_auto_commit=False`: **生产环境强烈建议关闭自动提交**，使用手动offset管理确保消息处理可靠性
-- `acks='all'`: 生产环境建议使用，等待所有副本确认，确保数据不丢失
-- `compression_type='gzip'`: 启用压缩可以节省网络带宽和存储空间
-- `max_poll_records=500`: 根据数据量和处理能力调整，避免消费超时
+- `enable_auto_commit: false`: **生产环境强烈建议关闭自动提交**，由 `OffsetManager` 负责手动提交
+- `acks: all`: 生产环境建议使用，等待所有副本确认
+- `compression_type: gzip`: 启用压缩节省网络带宽和存储空间
+- `multi_consumer_mode: true`: 为每个 topic 创建独立 consumer，避免高频 topic 单独占满 `max_poll_records`
+- `upload_interval_seconds`: 连续两次模型触发的最短间隔，0 表示不限速
 
-**Offset管理策略**（v1.1）：
+**Offset管理策略**：
 
 系统提供了线程安全且鲁棒的手动offset提交机制，具有以下特性：
 
@@ -254,7 +260,6 @@ data_expire_seconds = 600  # 10分钟，根据数据特点调整
 同步服务启动脚本
 """
 from d_a import DataAnalysisService
-from d_a.config import KAFKA_CONFIG
 import logging
 
 logging.basicConfig(
@@ -269,9 +274,9 @@ def my_callback(station_id, module_input):
     return module_input  # 返回结果将自动上传到Kafka
 
 if __name__ == '__main__':
+    # kafka_config 可省略，自动从 config.yaml 读取
     service = DataAnalysisService(
-        module_name='load_prediction',  # 指定模块名称
-        kafka_config=KAFKA_CONFIG,
+        module_name='load_prediction',
         data_expire_seconds=600
     )
     
@@ -294,7 +299,6 @@ if __name__ == '__main__':
 """
 import asyncio
 from d_a import AsyncDataAnalysisService
-from d_a.config import KAFKA_CONFIG
 import logging
 
 logging.basicConfig(
@@ -305,22 +309,26 @@ logging.basicConfig(
 async def my_callback(station_id, module_input):
     """异步处理数据的回调函数"""
     logging.info(f"处理场站 {station_id} 的数据")
-    # 这里添加你的异步业务逻辑
     await asyncio.sleep(0.01)  # 模拟异步操作
     return module_input  # 返回结果将自动上传到Kafka
 
+async def batch_upload_handler(batch_id, results_list):
+    """批次上传回调（可选）"""
+    logging.info(f"批次 {batch_id} 完成，共 {len(results_list)} 个场站")
+    # 一次性上传所有场站结果
+
 async def main():
+    # kafka_config / offset_commit_config 可省略，自动从 config.yaml 读取
     service = AsyncDataAnalysisService(
-        module_name='load_prediction',  # 指定模块名称
-        kafka_config=KAFKA_CONFIG,
+        module_name='load_prediction',
         data_expire_seconds=600
     )
     
     try:
-    await service.start(
-      callback=my_callback,
-      batch_upload_handler=batch_upload_handler,
-    )
+        await service.start(
+            callback=my_callback,
+            batch_upload_handler=batch_upload_handler,
+        )
         # 保持运行
         await asyncio.Event().wait()
     except KeyboardInterrupt:
@@ -476,22 +484,28 @@ aiokafka>=0.7.2
 
 ```bash
 # 构建镜像
-docker build -t data_analysis:v1.1 .
+docker build -t data_analysis:v2.0.0 .
 
 # 运行容器（同步服务）
 docker run -d \
   --name data_analysis_sync \
-  -v /path/to/config.py:/app/d_a/config.py \
+  -v /path/to/config.yaml:/app/config.yaml \
   -v /path/to/logs:/var/log/data_analysis \
-  data_analysis:v1.1
+  data_analysis:v2.0.0
 
 # 运行容器（异步服务）
 docker run -d \
   --name data_analysis_async \
-  -v /path/to/config.py:/app/d_a/config.py \
+  -v /path/to/config.yaml:/app/config.yaml \
   -v /path/to/logs:/var/log/data_analysis \
-  data_analysis:v1.1 \
+  data_analysis:v2.0.0 \
   python async_main.py
+
+# 也可通过环境变量指定配置文件路径
+docker run -d \
+  -e DATA_ANALYSIS_CONFIG_PATH=/etc/da/config.yaml \
+  -v /path/to/config.yaml:/etc/da/config.yaml \
+  data_analysis:v2.0.0
 
 # 查看日志
 docker logs -f data_analysis_sync
@@ -519,16 +533,18 @@ spec:
     spec:
       containers:
       - name: data-analysis
-        image: data_analysis:v1.1
+        image: data_analysis:v2.0.0
         env:
         - name: PYTHONPATH
           value: "/app"
         - name: DATA_ANALYSIS_LOG
           value: "/var/log/data_analysis/app.log"
+        - name: DATA_ANALYSIS_CONFIG_PATH
+          value: "/app/config.yaml"
         volumeMounts:
         - name: config-volume
-          mountPath: /app/d_a/config.py
-          subPath: config.py
+          mountPath: /app/config.yaml
+          subPath: config.yaml
         - name: log-volume
           mountPath: /var/log/data_analysis
         resources:
@@ -581,59 +597,51 @@ metadata:
   name: data-analysis-config
   namespace: production
 data:
-  config.py: |
-    # -*- coding: utf-8 -*-
-    """
-    配置文件
-    """
-    
-    # Kafka配置（嵌套格式，推荐）
-    KAFKA_CONFIG = {
-        'consumer': {
-            'bootstrap_servers': ['kafka-broker-1:9092', 'kafka-broker-2:9092', 'kafka-broker-3:9092'],
-            'group_id': 'data_analysis_prod',
-            'auto_offset_reset': 'latest',
-            'enable_auto_commit': True,
-            'max_poll_records': 500,
-            'session_timeout_ms': 30000,
-            'request_timeout_ms': 40000,
-            'heartbeat_interval_ms': 3000,
-        },
-        'producer': {
-            'bootstrap_servers': ['kafka-broker-1:9092', 'kafka-broker-2:9092', 'kafka-broker-3:9092'],
-            'acks': 'all',
-            'retries': 3,
-            'max_in_flight_requests_per_connection': 5,
-            'compression_type': 'gzip',
-            'linger_ms': 10,
-            'batch_size': 16384,
-        }
-    }
-    
-    # Topic配置（注意使用camelCase字段名）
-    TOPIC_DETAIL = {
-        'SCHEDULE-STATION-PARAM': {
-            'fields': ['stationId', 'stationTemp', 'lat', 'lng', ...],
-            'frequency': '新建站或配置更改时',
-            'modules': ['load_prediction', 'operation_optimization'],
-            'window_size': 1
-        },
-        # 其他topic配置...
-    }
-    
-    # 模块依赖配置
-    MODULE_DEPENDENCIES = {
-        'operation_optimization': ['load_prediction'],
-        'electricity_price': ['pv_prediction', 'evaluation_model', 'SOH_model'],
-        # 其他依赖配置...
-    }
-    
-    # 模块输出topic映射
-    MODULE_OUTPUT_TOPICS = {
-        'load_prediction': 'MODULE-OUTPUT-LOAD-PREDICTION',
-        'operation_optimization': 'MODULE-OUTPUT-OPERATION-OPTIMIZATION',
-        # 其他模块...
-    }
+  config.yaml: |
+    module_name: load_prediction
+
+    kafka:
+      bootstrap_servers:
+        - kafka-broker-1:9092
+        - kafka-broker-2:9092
+        - kafka-broker-3:9092
+      consumer:
+        group_id: data_analysis_prod
+        auto_offset_reset: latest
+        enable_auto_commit: false
+        max_poll_records: 500
+        session_timeout_ms: 30000
+        request_timeout_ms: 40000
+        heartbeat_interval_ms: 3000
+        multi_consumer_mode: true
+      producer:
+        acks: all
+        retries: 3
+        compression_type: gzip
+        linger_ms: 10
+        batch_size: 16384
+
+    offset_commit:
+      commit_interval_seconds: 5.0
+      commit_batch_size: 100
+      max_commit_retries: 3
+      commit_retry_delay: 1.0
+
+    upload_interval_seconds: 0
+
+    module_output:
+      topic_prefix: "MODULE-OUTPUT-"
+      topics:
+        load_prediction: "MODULE-OUTPUT-LOAD-PREDICTION"
+        operation_optimization: "MODULE-OUTPUT-OPERATION-OPTIMIZATION"
+
+    module_dependencies:
+      operation_optimization:
+        - load_prediction
+      electricity_price:
+        - pv_prediction
+        - evaluation_model
+        - SOH_model
 
 ```
 
